@@ -1,0 +1,1478 @@
+{
+  "info": {
+    "_postman_id": "2c6072af-7832-4c30-8ca0-49e160d5d32b",
+    "name": "Balo - Salesforce Integration",
+    "description": "Balo → Salesforce REST API collection. Covers OAuth token retrieval, standard object upserts (Lead, Account, Contact, Opportunity, Project, Consultation), and the custom Apex LeadConversionAPI endpoint.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "53022276",
+    "_collection_link": "https://go.postman.co/collection/53022276-2c6072af-7832-4c30-8ca0-49e160d5d32b?source=collection_link"
+  },
+  "item": [
+    {
+      "name": "Get Token",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "urlencoded",
+          "urlencoded": [
+            {
+              "key": "grant_type",
+              "value": "password"
+            },
+            {
+              "key": "client_id",
+              "value": "{{client_id}}"
+            },
+            {
+              "key": "client_secret",
+              "value": "{{client_secret}}"
+            },
+            {
+              "key": "username",
+              "value": "{{sf_username}}"
+            },
+            {
+              "key": "password",
+              "value": "{{sf_password}}"
+            }
+          ]
+        },
+        "url": {
+          "raw": "{{base_url}}/services/oauth2/token",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "services",
+            "oauth2",
+            "token"
+          ]
+        },
+        "description": "Obtain OAuth 2.0 access token (Resource Owner Password grant)."
+      },
+      "response": []
+    },
+    {
+      "name": "Upsert Lead",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{base_url}}/services/data/{{api_version}}/sobjects/Lead/Balo_Id__c/90191",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "services",
+            "data",
+            "{{api_version}}",
+            "sobjects",
+            "Lead",
+            "Balo_Id__c",
+            "90191"
+          ]
+        },
+        "description": "Create or update a Lead using Balo_Id__c as external ID. Replace the ID at the end of the URL with the user's unique Balo ID.\n\nBalo_Roles__c: admin, agency-admin, agency-expert, freelance-expert, client-admin, client-staff, client-guest\nCurrency__c: AUD, CAD, CHF, CNY, EUR, GBP, HKD, JPY, NZD, USD"
+      },
+      "response": []
+    },
+    {
+      "name": "Upsert Account",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"Name\": \"ABC Company\",\n  \"Phone\": \"555-1234\",\n  \"Website\": \"www.example.com\",\n  \"Type\": \"Company\",\n  \"AccountSource\": \"Balo Sourced\",\n  \"Stripe_Customer_Id__c\": \"STRIPE-CUST-123\",\n  \"Has_Booked_Consultation__c\": false,\n  \"Has_Redeemed_Credits__c\": false,\n  \"Has_Submitted_Project__c\": false,\n  \"Balo_Created_Date__c\": \"2026-01-16T13:00:00Z\",\n  \"Stripe_Seller_ID__c\": \"STRIPE-SELLER-123\",\n  \"Stripe_Connection_Status__c\": true\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{base_url}}/services/data/{{api_version}}/sobjects/Account/Balo_Id__c/88888",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "services",
+            "data",
+            "{{api_version}}",
+            "sobjects",
+            "Account",
+            "Balo_Id__c",
+            "88888"
+          ]
+        },
+        "description": "Create or update an Account (Company or Agency) using Balo_Id__c as external ID. Replace the ID at the end of the URL with the company/agency unique Balo ID.\n\nType values: Expert, Prospect, Partner, Customer"
+      },
+      "response": []
+    },
+    {
+      "name": "Upsert Contact (Expert)",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"FirstName\": \"Sally\",\n  \"LastName\": \"Doe\",\n  \"Email\": \"sally.doe@example.com\",\n  \"Phone\": \"555-1234\",\n  \"RecordTypeId\": \"012On00000LYlI9IAL\",\n  \"Expert_Type__c\": \"Freelancer\",\n  \"Is_Salesforce_Certified__c\": true,\n  \"Is_CTA__c\": false,\n  \"Is_MVP__c\": true,\n  \"Salesforce_Start_Year__c\": \"2015\",\n  \"Years_Experience__c\": \"10\",\n  \"Project_Count_Range__c\": \"10-25\",\n  \"Consultation_Min_Rate__c\": 3.25,\n  \"Average_Rating__c\": 5.5,\n  \"Total_Reviews__c\": 10,\n  \"LinkedIn_URL__c\": \"https://linkedin.com/in/sallydoe\",\n  \"Trailblazer_URL__c\": \"https://trailblazer.salesforce.com/sallydoe\",\n  \"Headline__c\": \"Salesforce MVP with 10 years experience\",\n  \"Application_Status__c\": \"Approved\",\n  \"Expert_Unique_ID__c\": \"EXPERT-123\",\n  \"Cronofy_User_ID__c\": \"CRONOFY-123\",\n  \"MailingCountry\": \"AU\",\n  \"Account\": {\n    \"Balo_Id__c\": \"12345\"\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{base_url}}/services/data/{{api_version}}/sobjects/Contact/Balo_Id__c/55555",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "services",
+            "data",
+            "{{api_version}}",
+            "sobjects",
+            "Contact",
+            "Balo_Id__c",
+            "55555"
+          ]
+        },
+        "description": "Create or update a Contact (Expert) using Balo_Id__c as external ID. Replace the ID at the end of the URL with the expert's unique Balo user ID. Link to Agency Account via Account.Balo_Id__c."
+      },
+      "response": []
+    },
+    {
+      "name": "Upsert Contact (Client)",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"FirstName\": \"James\",\n  \"LastName\": \"Smith\",\n  \"Email\": \"james.smith@example.com\",\n  \"Phone\": \"555-1234\",\n  \"RecordTypeId\": \"012On00000LYdFm\",\n  \"Balo_Role__c\": \"client-admin\",\n  \"Account\": {\n    \"Balo_Id__c\": \"88888\"\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{base_url}}/services/data/{{api_version}}/sobjects/Contact/Balo_Id__c/55555",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "services",
+            "data",
+            "{{api_version}}",
+            "sobjects",
+            "Contact",
+            "Balo_Id__c",
+            "55555"
+          ]
+        },
+        "description": "Create or update a Contact (Client user) using Balo_Id__c as external ID. Replace the ID at the end of the URL with the client's unique Balo user ID.\n\nBalo_Role__c values: admin, agency-admin, agency-expert, freelance-expert, client-admin, client-staff, client-guest"
+      },
+      "response": []
+    },
+    {
+      "name": "Upsert Opportunity (Case)",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"Name\": \"New Opportunity\",\n  \"CloseDate\": \"2026-12-31\",\n  \"StageName\": \"Ongoing\",\n  \"RecordTypeId\": \"012On00000L9nDVIAZ\",\n  \"Description\": \"This is a description\",\n  \"Total_Consultation_Minutes__c\": 55,\n  \"Total_Credits_Used__c\": 22,\n  \"Amount\": 1234,\n  \"Balo_Created_Date__c\": \"2026-01-16T13:00:00Z\",\n  \"Product__c\": \"sales-cloud;service-cloud\",\n  \"Type_of_Support__c\": \"technical-fix-and-development;platform-training\",\n  \"Account\": {\n    \"Balo_Id__c\": \"ACCT-TEST-001\"\n  },\n  \"Primary_Contact__r\": {\n    \"Balo_Id__c\": \"TEST-CONVERT-001\"\n  },\n  \"Expert__r\": {\n    \"Balo_Id__c\": \"22222\"\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{base_url}}/services/data/{{api_version}}/sobjects/Opportunity/Balo_Case_Number__c/:balo_case_number",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "services",
+            "data",
+            "{{api_version}}",
+            "sobjects",
+            "Opportunity",
+            "Balo_Case_Number__c",
+            ":balo_case_number"
+          ],
+          "variable": [
+            {
+              "key": "balo_case_number"
+            }
+          ]
+        },
+        "description": "Create or update a Case-type Opportunity using Balo_Case_Number__c as external ID. Replace :balo_case_number in the URL with the case's unique Balo ID.\n\n⚠️ Do NOT include Balo_Case_Number__c in the request body — it is specified in the URL only.\n\nStageName: Draft, Ongoing, Completed\nType_of_Support__c: technical-fix-and-development, architecture-and-integrations, strategy-and-best-practices, platform-training\nProduct__c: semicolon-separated e.g. sales-cloud;service-cloud"
+      },
+      "response": []
+    },
+    {
+      "name": "Upsert Opportunity (Project)",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"Name\": \"New Project\",\n  \"CloseDate\": \"2026-12-31\",\n  \"StageName\": \"Proposal\",\n  \"Sub_status__c\": \"draft-project-request\",\n  \"RecordTypeId\": \"012On00000L9nDVIAZ\",\n  \"Description\": \"This is a description\",\n  \"Project_Tag__c\": \"project-stage&&&new-implementation\",\n  \"Sourcing_Mode__c\": \"AI\",\n  \"Package__c\": \"PKG-123\",\n  \"Active_Proposal_Count__c\": 5,\n  \"Discovery_Insights__c\": \"These are some discovery insights\",\n  \"Submitted_Date__c\": \"2026-12-01\",\n  \"Balo_Created_Date__c\": \"2026-01-16T13:00:00Z\",\n  \"Product__c\": \"sales-cloud;service-cloud\",\n  \"Project_ID__c\": \"PROJECT-123\",\n  \"Total_Cost_Inc_Fees__c\": 5000,\n  \"GST_Charged__c\": 100,\n  \"Expert_Earnings__c\": 4500,\n  \"Account\": {\n    \"Balo_Id__c\": \"12345\"\n  },\n  \"Primary_Contact__r\": {\n    \"Balo_Id__c\": \"12345\"\n  },\n  \"Related_Case__r\": {\n    \"Balo_Id__c\": \"12345\"\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{base_url}}/services/data/{{api_version}}/sobjects/Opportunity/Balo_Id__c/:balo_id",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "services",
+            "data",
+            "{{api_version}}",
+            "sobjects",
+            "Opportunity",
+            "Balo_Id__c",
+            ":balo_id"
+          ],
+          "variable": [
+            {
+              "key": "balo_id"
+            }
+          ]
+        },
+        "description": "Create or update a Project-type Opportunity using Balo_Id__c as external ID. Replace :balo_id in the URL with the project's unique Balo ID.\n\n⚠️ Do NOT include Balo_Id__c in the request body — it is specified in the URL only.\n\nStageName: Request, Proposal, Project\nSub_status__c: draft-project-request, requested, matching-experts, discovery-call-required, experts-invited, archived, draft-project, awaiting-kick-off-approval, declined, ready-to-start, approved, in-progress, awaiting-completion-approval, completed\nSourcing_Mode__c: AI, Manual, Final\nProduct__c: semicolon-separated e.g. sales-cloud;service-cloud"
+      },
+      "response": []
+    },
+    {
+      "name": "Upsert Expert (for Project)",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"Expert_EOI_Status__c\": \"invited\",\n  \"Opportunity__r\": {\n    \"Balo_Id__c\": \"USER-123\"\n  },\n  \"Expert__r\": {\n    \"Balo_Id__c\": \"USER-ID\"\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{base_url}}/services/data/{{api_version}}/sobjects/Project__c/Balo_Id__c/6271",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "services",
+            "data",
+            "{{api_version}}",
+            "sobjects",
+            "Project__c",
+            "Balo_Id__c",
+            "6271"
+          ]
+        },
+        "description": "Create or update a Project__c record linking an Expert to a Project Opportunity. The ID at the end of the URL is 'ProjectRequestID-ExpertUserID'.\n\nExpert_EOI_Status__c: invited, interested, proposal-requested, proposed, declined, not-interested, finalized"
+      },
+      "response": []
+    },
+    {
+      "name": "Upsert Consultation",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"Opportunity__r\": {\n    \"Balo_Id__c\": \"66555\"\n  },\n  \"Project__r\": {\n    \"Balo_Id__c\": \"66555\"\n  },\n  \"Expert__r\": {\n    \"Balo_Id__c\": \"66555\"\n  },\n  \"Scheduled_DateTime__c\": \"2026-01-16T13:00:00Z\",\n  \"Start_Time__c\": \"2026-01-16T13:00:00Z\",\n  \"End_Time__c\": \"2026-01-16T13:00:00Z\",\n  \"Actual_End_Time__c\": \"2026-01-16T13:00:00Z\",\n  \"Duration_Minutes__c\": 60,\n  \"Actual_Duration_Minutes__c\": 55,\n  \"Status__c\": \"Completed\",\n  \"Billing_Mode__c\": \"Metered\",\n  \"Expert_Rate__c\": 5,\n  \"Estimated_Cost__c\": 500,\n  \"Final_Cost__c\": 500,\n  \"GST_Amount__c\": 50,\n  \"Cancellation_Allowed__c\": \"2026-01-16T13:00:00Z\",\n  \"Cancellation_Reason__c\": \"Change of mind\",\n  \"Cancelled_By__c\": \"Client\",\n  \"Client_Join_Time__c\": \"2026-01-16T13:00:00Z\",\n  \"Expert_Join_Time__c\": \"2026-01-16T13:00:00Z\",\n  \"Ended_By_Expert__c\": \"2026-01-16T13:00:00Z\",\n  \"Ended_By_Client__c\": \"2026-01-16T13:00:00Z\",\n  \"Participants_Present__c\": true,\n  \"Balo_Created_Date__c\": \"2026-01-16T13:00:00Z\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{base_url}}/services/data/{{api_version}}/sobjects/Consultation__c/Balo_Id__c/11111",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "services",
+            "data",
+            "{{api_version}}",
+            "sobjects",
+            "Consultation__c",
+            "Balo_Id__c",
+            "11111"
+          ]
+        },
+        "description": "Create or update a Consultation__c record. Replace the ID at the end of the URL with the meeting record's unique Balo ID.\n\nStatus__c: Upcoming, Completed, Cancelled, Missed\nBilling_Mode__c: Free, Metered, Fixed\nCancelled_By__c: Client, Expert"
+      },
+      "response": []
+    },
+    {
+      "name": "Upsert Prospect (Signup)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"baloId\": \"TEST-CLIENT-002\",\n  \"email\": \"jane.smith@testcompany.com\",\n  \"firstName\": \"Jane\",\n  \"lastName\": \"Smith\",\n  \"phone\": \"0412345678\",\n  \"baloRole\": \"client-admin\",\n  \"prospectStatus\": \"Signed Up\",\n  \"signupDate\": \"2026-03-16T09:00:00Z\",\n  \"timezone\": \"Australia/Melbourne\",\n  \"currencyCode\": \"AUD\",\n  \"country\": \"Australia\",\n  \"baloAccountId\": \"TEST-COMPANY-005\",\n  \"companyName\": \"Test Company Pty Ltd\",\n  \"accountType\": \"Company\",\n  \"baloAccountCreatedDate\": \"2026-03-16T09:00:00Z\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{base_url}}/services/apexrest/Prospect/",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "services",
+            "apexrest",
+            "Prospect",
+            ""
+          ]
+        },
+        "description": "Single signup endpoint — creates Prospect__c, Account, and Contact in one atomic POST call.\n\nRequired fields: baloId, email\n\nbaloRole values: admin, agency-admin, agency-expert, freelance-expert, client-admin, client-staff, client-guest\nprospectStatus values: Signed Up, Active, Converted, Churned\naccountType values: Expert, Prospect, Partner, Customer\n\nResponse returns: prospectId, accountId, contactId"
+      },
+      "response": []
+    },
+    {
+      "name": "N/A - Convert Lead (Case)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\\n  \\\"customerBaloId\\\": \\\"bbbbb\\\",\\n  \\\"expertBaloId\\\": \\\"22222\\\",\\n  \\\"opportunityBaloId\\\": \\\"12345\\\",\\n  \\\"opportunityType\\\": \\\"Case\\\",\\n  \\\"opportunityName\\\": \\\"New Opportunity\\\",\\n  \\\"closeDate\\\": \\\"2026-12-31\\\",\\n  \\\"stageName\\\": \\\"Ongoing\\\",\\n  \\\"description\\\": \\\"This is a description\\\",\\n  \\\"productList\\\": \\\"sales-cloud;service-cloud\\\",\\n  \\\"baloCreatedDate\\\": \\\"2026-01-16T13:00:00Z\\\",\\n  \\\"primaryContactBaloId\\\": \\\"11111\\\",\\n  \\\"baloCaseNumber\\\": \\\"CASE-12345\\\",\\n  \\\"totalConsultationMinutes\\\": 55,\\n  \\\"totalCreditsUsed\\\": 22,\\n  \\\"amount\\\": 1234,\\n  \\\"typeOfSupport\\\": \\\"technical-fix-and-development\\\"\\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{base_url}}/services/apexrest/Booking/",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "services",
+            "apexrest",
+            "Booking",
+            ""
+          ]
+        },
+        "description": "Converts a Lead → Account + Contact and creates a Case-type Opportunity in one atomic call.\n\nRequired: customerBaloId, opportunityType (Case), opportunityBaloId, expertBaloId"
+      },
+      "response": []
+    },
+    {
+      "name": "N/A - Convert Lead (Project Only)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\\n  \\\"customerBaloId\\\": \\\"90191\\\",\\n  \\\"opportunityType\\\": \\\"Project\\\",\\n  \\\"opportunityBaloId\\\": \\\"999991\\\",\\n  \\\"opportunityName\\\": \\\"New Project\\\",\\n  \\\"closeDate\\\": \\\"2026-12-31\\\",\\n  \\\"stageName\\\": \\\"Proposal\\\",\\n  \\\"subStatus\\\": \\\"draft-project-request\\\",\\n  \\\"description\\\": \\\"This is a description\\\",\\n  \\\"projectTag\\\": \\\"project-stage&&&new-implementation\\\",\\n  \\\"sourcingMode\\\": \\\"AI\\\",\\n  \\\"packageId\\\": \\\"PKG-123\\\",\\n  \\\"activeProposalCount\\\": 5,\\n  \\\"discoveryInsights\\\": \\\"These are some discovery insights\\\",\\n  \\\"submittedDate\\\": \\\"2026-12-01\\\",\\n  \\\"baloCreatedDate\\\": \\\"2026-01-16T13:00:00Z\\\",\\n  \\\"productList\\\": \\\"sales-cloud;service-cloud\\\",\\n  \\\"projectId\\\": \\\"PROJECT-123\\\",\\n  \\\"totalCostIncFees\\\": 5000,\\n  \\\"gstCharged\\\": 100,\\n  \\\"expertEarnings\\\": 4500,\\n  \\\"primaryContactBaloId\\\": \\\"11111\\\"\\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{base_url}}/services/apexrest/Booking/",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "services",
+            "apexrest",
+            "Booking",
+            ""
+          ]
+        },
+        "description": "Converts a Lead → Account + Contact and creates a Project-type Opportunity (no experts assigned yet).\n\nRequired: customerBaloId, opportunityType (Project), opportunityBaloId"
+      },
+      "response": []
+    },
+    {
+      "name": "N/A - Convert Lead (Project with Experts)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\\n  \\\"customerBaloId\\\": \\\"aaaaa\\\",\\n  \\\"opportunityType\\\": \\\"Project\\\",\\n  \\\"opportunityBaloId\\\": \\\"12345\\\",\\n  \\\"opportunityName\\\": \\\"New Project with Experts\\\",\\n  \\\"closeDate\\\": \\\"2026-12-31\\\",\\n  \\\"stageName\\\": \\\"Proposal\\\",\\n  \\\"subStatus\\\": \\\"draft-project-request\\\",\\n  \\\"description\\\": \\\"This is a description\\\",\\n  \\\"projectTag\\\": \\\"project-stage&&&new-implementation\\\",\\n  \\\"sourcingMode\\\": \\\"AI\\\",\\n  \\\"packageId\\\": \\\"PKG-123\\\",\\n  \\\"activeProposalCount\\\": 5,\\n  \\\"discoveryInsights\\\": \\\"These are some discovery insights\\\",\\n  \\\"submittedDate\\\": \\\"2026-12-01\\\",\\n  \\\"baloCreatedDate\\\": \\\"2026-01-16T13:00:00Z\\\",\\n  \\\"productList\\\": \\\"sales-cloud;service-cloud\\\",\\n  \\\"projectId\\\": \\\"PROJECT-123\\\",\\n  \\\"totalCostIncFees\\\": 5000,\\n  \\\"gstCharged\\\": 100,\\n  \\\"expertEarnings\\\": 4500,\\n  \\\"primaryContactBaloId\\\": \\\"11111\\\",\\n  \\\"relatedCaseBaloId\\\": \\\"CASE-456\\\",\\n  \\\"projectExpertBaloIds\\\": [\\\"77777\\\", \\\"22222\\\"]\\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{base_url}}/services/apexrest/Booking/",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "services",
+            "apexrest",
+            "Booking",
+            ""
+          ]
+        },
+        "description": "Converts a Lead → Account + Contact and creates a Project-type Opportunity with multiple Expert Project__c records.\n\nprojectExpertBaloIds: array of expert Balo IDs\nRequired: customerBaloId, opportunityType (Project), opportunityBaloId"
+      },
+      "response": []
+    },
+    {
+      "name": "Test Prospect - Client with Company",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status code is 200', function() {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test('Response success is true', function() {",
+              "    var json = pm.response.json();",
+              "    pm.expect(json.success).to.be.true;",
+              "    pm.expect(json.errorMessage).to.be.null;",
+              "});",
+              "",
+              "pm.test('All three IDs returned', function() {",
+              "    var json = pm.response.json();",
+              "    pm.expect(json.prospectId).to.be.a('string');",
+              "    pm.expect(json.accountId).to.be.a('string');",
+              "    pm.expect(json.contactId).to.be.a('string');",
+              "});",
+              "",
+              "// Save IDs for verification",
+              "var json = pm.response.json();",
+              "if (json.prospectId) pm.collectionVariables.set('last_prospect_id', json.prospectId);",
+              "if (json.accountId) pm.collectionVariables.set('last_account_id', json.accountId);",
+              "if (json.contactId) pm.collectionVariables.set('last_contact_id', json.contactId);"
+            ],
+            "type": "text/javascript",
+            "packages": {},
+            "requests": {}
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"baloId\": \"1771989876338x326599309252931600\",\n  \"email\": \"molly@medi.au\",\n  \"firstName\": \"Molly\",\n  \"lastName\": \"Yang\",\n  \"phone\": \"0412345678\",\n  \"baloRole\": \"client-staff\",\n  \"prospectStatus\": \"Signed Up\",\n  \"signupDate\": \"2026-02-25T08:54:00Z\",\n  \"timezone\": \"Australia/Sydney\",\n  \"currencyCode\": \"AUD\",\n  \"country\": \"Australia\",\n  \"baloAccountId\": \"1749173177291x476595545502580100\",\n  \"companyName\": \"medi Australia\",\n  \"accountType\": \"Prospect\",\n  \"baloAccountCreatedDate\": \"2026-02-25T08:54:00Z\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{base_url}}/services/apexrest/Prospect/",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "services",
+            "apexrest",
+            "Prospect",
+            ""
+          ]
+        },
+        "description": "TEST SCENARIO 1 — Client user signing up with a company."
+      },
+      "response": []
+    },
+    {
+      "name": "Test Prospect - Freelance Expert (no company)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status code is 200', function() {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test('Response success is true', function() {",
+              "    var json = pm.response.json();",
+              "    pm.expect(json.success).to.be.true;",
+              "});",
+              "",
+              "pm.test('Prospect and Contact IDs returned, no Account', function() {",
+              "    var json = pm.response.json();",
+              "    pm.expect(json.prospectId).to.be.a('string');",
+              "    pm.expect(json.contactId).to.be.a('string');",
+              "    pm.expect(json.accountId).to.be.null;",
+              "});"
+            ],
+            "type": "text/javascript",
+            "packages": {},
+            "requests": {}
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"baloId\": \"1773695102593x441569089056593300\",\n  \"baloAccountId\": \"1773695102593x441569089056593300\",\n  \"email\": \"sagarika@omniflexconsulting.com\",\n  \"firstName\": \"Sagarika\",\n  \"lastName\": \"Sundaramoorthy\",\n  \"phone\": \"\",\n  \"baloRole\": \"freelance-expert\",\n  \"prospectStatus\": \"Signed Up\",\n  \"signupDate\": \"2026-03-17T02:38:00Z\",\n  \"timezone\": \"America/Chicago\",\n  \"currencyCode\": \"USD\",\n  \"country\": \"United States\",\n  \"accountType\": \"Prospect\",\n  \"companyName\": \"Sagarika Sudaramoorthy - Freelance Expert\",\n  \"baloAccountCreatedDate\": \"2026-03-17T02:38:00Z\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{base_url}}/services/apexrest/Prospect/",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "services",
+            "apexrest",
+            "Prospect",
+            ""
+          ]
+        },
+        "description": "TEST SCENARIO 2 — Freelance expert signing up (no company/account)."
+      },
+      "response": []
+    },
+    {
+      "name": "Test Prospect - Agency Expert with Agency Account",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status code is 200', function() {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test('Response success is true', function() {",
+              "    var json = pm.response.json();",
+              "    pm.expect(json.success).to.be.true;",
+              "});",
+              "",
+              "pm.test('All three IDs returned', function() {",
+              "    var json = pm.response.json();",
+              "    pm.expect(json.prospectId).to.be.a('string');",
+              "    pm.expect(json.accountId).to.be.a('string');",
+              "    pm.expect(json.contactId).to.be.a('string');",
+              "});"
+            ],
+            "type": "text/javascript",
+            "packages": {},
+            "requests": {}
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"baloId\": \"TEST-AGENCY-EXP-001\",\n  \"email\": \"sarah.agency@expertco.com\",\n  \"firstName\": \"Sarah\",\n  \"lastName\": \"Agency\",\n  \"phone\": \"0411222333\",\n  \"baloRole\": \"agency-expert\",\n  \"prospectStatus\": \"Signed Up\",\n  \"signupDate\": \"2026-03-16T09:00:00Z\",\n  \"timezone\": \"Australia/Brisbane\",\n  \"currencyCode\": \"AUD\",\n  \"country\": \"Australia\",\n  \"baloAccountId\": \"TEST-AGENCY-001\",\n  \"companyName\": \"Expert Co Agency\",\n  \"accountType\": \"Prospect\",\n  \"baloAccountCreatedDate\": \"2026-03-16T09:00:00Z\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{base_url}}/services/apexrest/Prospect/",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "services",
+            "apexrest",
+            "Prospect",
+            ""
+          ]
+        },
+        "description": "TEST SCENARIO 3 — Agency expert signing up under an agency account."
+      },
+      "response": []
+    },
+    {
+      "name": "Test Prospect - Missing Balo ID (expect 400)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status code is 400', function() {",
+              "    pm.response.to.have.status(400);",
+              "});",
+              "",
+              "pm.test('Response success is false', function() {",
+              "    var json = pm.response.json();",
+              "    pm.expect(json.success).to.be.false;",
+              "    pm.expect(json.errorMessage).to.equal('Balo ID is required');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"missing.balo@example.com\",\n  \"firstName\": \"Missing\",\n  \"lastName\": \"BaloId\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{base_url}}/services/apexrest/Prospect/",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "services",
+            "apexrest",
+            "Prospect",
+            ""
+          ]
+        },
+        "description": "TEST SCENARIO 4 — Validation error. Missing required baloId field. Expected 400."
+      },
+      "response": []
+    },
+    {
+      "name": "Test Upsert Opportunity (Case)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Upsert successful', function () {",
+              "    pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]);",
+              "});",
+              "",
+              "pm.test('No error body returned', function () {",
+              "    if (pm.response.code !== 204) {",
+              "        const json = pm.response.json();",
+              "        pm.expect(json).to.not.have.property('errorCode');",
+              "    }",
+              "});",
+              "",
+              "if (pm.response.code === 201) {",
+              "    const json = pm.response.json();",
+              "    console.log('Created Opportunity ID:', json.id);",
+              "}"
+            ],
+            "type": "text/javascript",
+            "packages": {},
+            "requests": {}
+          }
+        }
+      ],
+      "request": {
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"Name\": \"TEST - Agentforce Config Fix\",\n  \"CloseDate\": \"2026-12-31\",\n  \"StageName\": \"Ongoing\",\n  \"RecordTypeId\": \"012On00000L9nDVIAZ\",\n  \"Description\": \"Test upsert — verifying Opportunity (Case) sync from Balo to Salesforce.\",\n  \"Total_Consultation_Minutes__c\": 60,\n  \"Total_Credits_Used__c\": 330.0,\n  \"Amount\": 330.0,\n  \"Balo_Created_Date__c\": \"2026-01-18T07:34:00Z\",\n  \"Product__c\": \"agentforce\",\n  \"Type_of_Support__c\": \"technical-fix-and-development\",\n  \"Account\": {\n    \"Balo_Id__c\": \"TEST-COMPANY-001\"\n  },\n  \"Primary_Contact__r\": {\n    \"Balo_Id__c\": \"TEST-CLIENT-001\"\n  },\n  \"Expert__r\": {\n    \"Balo_Id__c\": \"1771989876338x326599309252931600\"\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{base_url}}/services/data/{{api_version}}/sobjects/Opportunity/Balo_Case_Number__c/TEST-CASE-001",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "services",
+            "data",
+            "{{api_version}}",
+            "sobjects",
+            "Opportunity",
+            "Balo_Case_Number__c",
+            "TEST-CASE-001"
+          ]
+        },
+        "description": "Test upsert for Opportunity (Case) using Balo_Case_Number__c as the external ID.\n\n⚠️ Balo_Case_Number__c is in the URL only — do NOT include it in the request body.\n\nMatched on: Balo_Case_Number__c = TEST-CASE-001\nAccount: TEST-COMPANY-001 | Primary Contact: TEST-CLIENT-001 | Expert: Molly Yang\n\nExpected: 201 Created (first run) or 204 No Content (subsequent runs)"
+      },
+      "response": []
+    },
+    {
+      "name": "Test Upsert Opportunity (Project)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Upsert successful', function () {",
+              "    pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]);",
+              "});",
+              "",
+              "pm.test('No error body returned', function () {",
+              "    if (pm.response.code !== 204) {",
+              "        const json = pm.response.json();",
+              "        pm.expect(json).to.not.have.property('errorCode');",
+              "    }",
+              "});",
+              "",
+              "if (pm.response.code === 201) {",
+              "    const json = pm.response.json();",
+              "    console.log('Created Opportunity ID:', json.id);",
+              "}"
+            ],
+            "type": "text/javascript",
+            "packages": {},
+            "requests": {}
+          }
+        }
+      ],
+      "request": {
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"Name\": \"TEST - Agentforce Integration Project\",\n  \"CloseDate\": \"2026-12-31\",\n  \"StageName\": \"Proposal\",\n  \"Sub_status__c\": \"draft-project-request\",\n  \"RecordTypeId\": \"012On00000L9nILIAZ\",\n  \"Description\": \"Test upsert — verifying Opportunity (Project) sync from Balo to Salesforce.\",\n  \"Project_Tag__c\": \"project-stage&&&new-implementation\",\n  \"Sourcing_Mode__c\": \"AI\",\n  \"Package__c\": \"PKG-TEST-001\",\n  \"Active_Proposal_Count__c\": 2,\n  \"Discovery_Insights__c\": \"Client needs Agentforce integrated with existing Service Cloud setup.\",\n  \"Submitted_Date__c\": \"2026-03-19\",\n  \"Balo_Created_Date__c\": \"2026-03-19T05:00:00Z\",\n  \"Product__c\": \"agentforce;service-cloud\",\n  \"Project_ID__c\": \"TEST-PROJECT-001\",\n  \"Total_Cost_Inc_Fees__c\": 5000,\n  \"GST_Charged__c\": 500,\n  \"Expert_Earnings__c\": 4500,\n  \"Account\": {\n    \"Balo_Id__c\": \"TEST-COMPANY-001\"\n  },\n  \"Primary_Contact__r\": {\n    \"Balo_Id__c\": \"TEST-CLIENT-001\"\n  },\n  \"Related_Case__r\": {\n    \"Balo_Case_Number__c\": \"TEST-CASE-001\"\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{base_url}}/services/data/{{api_version}}/sobjects/Opportunity/Balo_Id__c/TEST-PROJECT-001",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "services",
+            "data",
+            "{{api_version}}",
+            "sobjects",
+            "Opportunity",
+            "Balo_Id__c",
+            "TEST-PROJECT-001"
+          ]
+        },
+        "description": "Test upsert for Opportunity (Project) using Balo_Id__c as the external ID.\n\n⚠️ Balo_Id__c is in the URL only — do NOT include it in the request body.\n\nMatched on: Balo_Id__c = TEST-PROJECT-001\nAccount: TEST-COMPANY-001 | Primary Contact: TEST-CLIENT-001\nRelated Case: TEST-CASE-001 (linked via Balo_Case_Number__c)\n\nExpected: 201 Created (first run) or 204 No Content (subsequent runs)"
+      },
+      "response": []
+    },
+    {
+      "name": "🧪 Test | Patch Account",
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"Name\": \"Bryd\",\n  \"Type\": \"Expert\",\n  \"AccountSource\": \"Balo Sourced\",\n  \"Stripe_Customer_ID__c\": \"\",\n  \"Stripe_Seller_ID__c\": \"acct_1RJ4RaRvAbx4oWBP\",\n  \"Stripe_Connection_Status__c\": true,\n  \"Has_Booked_Consultation__c\": true,\n  \"Has_Redeemed_Credits__c\": true,\n  \"Has_Submitted_Project__c\": true,\n  \"phone\": \"+6593386791\",\n  \"website\": \"www.bryd.io\",\n  \"Balo_Created_Date__c\": \"2025-06-06T01:26:17.301Z\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": ""
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "🧪 Test | Patch Contact",
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"FirstName\": \"Nik\",\n  \"LastName\": \"Thompson\",\n  \"Email\": \"nik@example.com\",\n  \"Phone\": \"\",\n  \"RecordTypeId\": \"012On00000LYdFm\",\n  \"Balo_Role__c\": \"client-admin\",\n  \"Account\": {\n    \"Balo_Id__c\": \"1750905854904x936663054694652700\"\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{base_url}}/services/data/{{api_version}}/sobjects/Contact/Balo_Id__c/1750905753231x285006760500304830",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "services",
+            "data",
+            "{{api_version}}",
+            "sobjects",
+            "Contact",
+            "Balo_Id__c",
+            "1750905753231x285006760500304830"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "🧪 Test | Post Prospect",
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"baloId\": \"1749173126329x445940724232150460\",\n  \"email\": \"Alex@example.com\",\n  \"firstName\": \"Alex\",\n  \"lastName\": \"Carver\",\n  \"baloRole\": \"client-admin\",\n  \"baloRoles\": [\n    \"client-admin\",\n    \"client-staff\"\n  ],\n  \"prospectStatus\": \"Signed Up\",\n  \"signupDate\": \"2025-06-06T01:25:26.329Z\",\n  \"timezone\": \"Australia/Sydney\",\n  \"currencyCode\": \"AUD\",\n  \"country\": \"Australia\",\n  \"baloAccountId\": \"1749173177291x476595545502580100\",\n  \"companyName\": \"medi Australia\",\n  \"accountType\": \"Company\",\n  \"baloAccountCreatedDate\": \"2025-06-06T01:26:17.301Z\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{base_url}}/services/apexrest/Prospect/",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "services",
+            "apexrest",
+            "Prospect",
+            ""
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "🧪 Test | Patch Expert Agency",
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"baloId\": \"1773015865645x577791414094761500\",\n  \"email\": \"Adam@example.com\",\n  \"firstName\": \"Adam\",\n  \"lastName\": \"Gibbons\",\n  \"baloRole\": \"client-staff\",\n  \"baloRoles\": [\n    \"client-staff\"\n  ],\n  \"prospectStatus\": \"Signed Up\",\n  \"signupDate\": \"2026-03-09T00:24:25.645Z\",\n  \"timezone\": \"Australia/Sydney\",\n  \"currencyCode\": \"AUD\",\n  \"country\": \"Australia\",\n  \"baloAccountId\": \"1749173177291x476595545502580100\",\n  \"companyName\": \"medi Australia\",\n  \"accountType\": \"Company\",\n  \"baloAccountCreatedDate\": \"2025-06-06T01:26:17.301Z\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{base_url}}/services/data/{{api_version}}/sobjects/Contact/Balo_Id__c/1744592107046x151169774301789240",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "services",
+            "data",
+            "{{api_version}}",
+            "sobjects",
+            "Contact",
+            "Balo_Id__c",
+            "1744592107046x151169774301789240"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "🧪 Test | Patch Freelance Expert 1 (Creates Sole Trader Account)",
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"Name\": \"Andre van Kampen - Sole Trader\",\n  \"Type\": \"Expert\",\n  \"AccountSource\": \"Balo Sourced\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{base_url}}/services/data/{{api_version}}/sobjects/Account/Balo_Id__c/1739863901093x459636610536370940",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "services",
+            "data",
+            "{{api_version}}",
+            "sobjects",
+            "Account",
+            "Balo_Id__c",
+            "1739863901093x459636610536370940"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "🧪 Test | Patch Freelance Expert 2",
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"FirstName\": \"Andre\",\n  \"LastName\": \"van Kampen\",\n  \"Email\": \"Andre@example.com\",\n  \"Phone\": \"+31650522361\",\n  \"RecordTypeId\": \"012On00000LYlI9IAL\",\n  \"Balo_Role__c\": \"freelance-expert\",\n  \"Expert_Type__c\": \"Freelancer\",\n  \"Is_Salesforce_Certified__c\": true,\n  \"Is_MVP__c\": true,\n  \"Salesforce_Start_Year__c\": \"2013\",\n  \"Years_Experience__c\": \"12\",\n  \"Project_Count_Range__c\": \"26-50\",\n  \"Consultation_Min_Rate__c\": 3.3,\n  \"LinkedIn_URL__c\": \"https://www.linkedin.com/in/andrevankampen/\",\n  \"Trailblazer_URL__c\": \"https://www.salesforce.com/trailblazer/avkampen\",\n  \"Headline__c\": \"Salesforce MVP | Helping businesses succeed with Salesforce | Focus on happy users and data quality\",\n  \"Application_Status__c\": \"approved\",\n  \"Expert_Unique_ID__c\": \"1739865814612x436179894781791000\",\n  \"Cronofy_User_ID__c\": \"acc_67b585e1f11b114cae7bb706\",\n  \"MailingCountry\": \"NL\",\n  \"Account\": { \"Balo_Id__c\": \"1739863901093x459636610536370940\" }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{base_url}}/services/data/{{api_version}}/sobjects/Contact/Balo_Id__c/1739863901093x459636610536370940",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "services",
+            "data",
+            "{{api_version}}",
+            "sobjects",
+            "Contact",
+            "Balo_Id__c",
+            "1739863901093x459636610536370940"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "🧪 Test | Opportunity Cases",
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"Name\": \"review SOW vs live environment from implementation partner\",\n  \"CloseDate\": \"2026-12-31\",\n  \"StageName\": \"Ongoing\",\n  \"RecordTypeId\": \"012On00000L9nDVIAZ\",\n  \"Balo_Case_Number__c\" : \"MED-42409\",\n  \"Description\": \"we're not convinced we have what we paid for in our saleforce environment set up. We'd appreciate some independant advice on what we have vs the SOW agreed on - and what we can do to get us there.\\nThere are also some requests we have that have been deemed \\\"not possible\\\" - advise on these point would also be appreciated\",\n  \"Total_Consultation_Minutes__c\": 354.0,\n  \"Total_Credits_Used__c\": 496.56,\n  \"Amount\": 369.48,\n  \"Balo_Created_Date__c\": \"2025-06-10T02:19:02.597Z\",\n  \"Product__c\": \"sales-cloud;service-cloud;engagement\",\n  \"Type_of_Support__c\": \"technical-fix-and-development\",\n  \"Account\": {\n    \"Balo_Id__c\": \"1749173177291x476595545502580100\"\n  },\n  \"Primary_Contact__r\": {\n    \"Balo_Id__c\": \"1749173126329x445940724232150460\"\n  },\n  \"Expert__r\": {\n    \"Balo_Id__c\": \"1738044356079x379816390140377300\"\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{base_url}}/services/data/{{api_version}}/sobjects/Opportunity/Balo_Id__c/1749521938036x625774774235693000",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "services",
+            "data",
+            "{{api_version}}",
+            "sobjects",
+            "Opportunity",
+            "Balo_Id__c",
+            "1749521938036x625774774235693000"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "🧪 Test | Opportunity Projects",
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"Name\": \"Dynamic PopUp\",\n  \"CloseDate\": \"2025-09-29\",\n  \"StageName\": \"Project\",\n  \"Sub_status__c\": \"completed\",\n  \"RecordTypeId\": \"012On00000L9nILIAZ\",\n  \"Description\": \"[h1][b]Project Proposal: Collins Booking Link Auto-Open Feature[/b][/h1]\\n[b]Prepared for:[/b] AlphaX\\n [b]Prepared by:[/b] Erkan Cipil\\n [b]Date:[/b] 10/09/2025\\n[h2][b]1. Objective[/b][/h2]\\nEnhance the Salesforce Service Console by introducing a feature that automatically opens the relevant [b]Collins booking page[/b] in a separate browser window whenever a Case is opened. This functionality will:\\n[ml][ul][li indent=0 align=left]Improve agent efficiency by providing immediate visibility into booking or diary details.[/li][li indent=0 align=left]Allow users to [b]toggle the feature on or off[/b] within the console.[/li][li indent=0 align=left]Ensure the solution does [b]not interfere with the existing embedded Collins iframe[/b], but instead extends functionality for easier access.[/li][/ul][/ml][h2][b]2. Scope of Work[/b][/h2]\\n[h3][b]Feature Details[/b][/h3]\\n[ml][ol][li indent=0 align=left][b]Toggle Control[/b][/li][/ol][/ml][ml][ul][ul data=1][li indent=1 align=left]Add a user-friendly toggle within the Salesforce Service Console (e.g., Utility Bar or Case layout).[/li][li indent=1 align=left]Each user can enable or disable the auto-open feature independently.[/li][/ul][/ul][/ml][ml][ol][li indent=0 align=left][b]Auto-Open Collins Window[/b][/li][/ol][/ml][ml][ul][ul data=1][li indent=1 align=left]When enabled, opening the first Case launches a [b]dedicated Collins window[/b].[/li][li indent=1 align=left]If the Case has a booking link → open the booking page.[/li][li indent=1 align=left]If no booking is linked → open the venue diary page.[/li][li indent=1 align=left]Subsequent Case selections update the existing Collins window (no new windows created).[/li][/ul][/ul][/ml][ml][ol][li indent=0 align=left][b]Window Management[/b][/li][/ol][/ml][ml][ul][ul data=1][li indent=1 align=left]Use a consistent, named window so it reuses the same browser tab/window.[/li][li indent=1 align=left]If Collins supports postMessage, leverage it for smooth updates. Otherwise, update the window URL directly.[/li][/ul][/ul][/ml][ml][ol][li indent=0 align=left][b]Existing Iframe[/b][/li][/ol][/ml][ml][ul][ul data=1][li indent=1 align=left]Leave the current embedded iframe untouched.[/li][li indent=1 align=left]New functionality complements, not replaces, the current approach.[/li][/ul][/ul][/ml][ml][ol][li indent=0 align=left][b]User Guide[/b][/li][/ol][/ml][ml][ul][li indent=0 align=left]Provide a short, illustrated guide explaining:[/li][ul data=2][ul data=2][li indent=2 align=left]How to toggle the feature.[/li][li indent=2 align=left]Expected behavior when enabled or disabled.[/li][/ul][li indent=1 align=left]How to report issues.[/li][/ul][/ul][/ml][h2][b]3. Deliverables[/b][/h2]\\n[ml][ul][li indent=0 align=left][b]Lightning Web Component / Utility Bar Component[/b] with toggle functionality.[/li][li indent=0 align=left][b]Auto-open & update logic[/b] for the Collins booking/diary window.[/li][li indent=0 align=left][b]Testing[/b] across scenarios: booking-linked Cases, no-booking Cases, multiple Case switches.[/li][li indent=0 align=left][b]Documentation/User Guide[/b] (PDF or online doc).[/li][li indent=0 align=left][b]Handover session[/b] (optional walkthrough).[/li][/ul][/ml][h2][b]4. Effort Estimate[/b][/h2]\\nTaskHoursDiscovery & design 1–2 hrs\\nToggle component 2–3 hrs\\nWindow management logic 3–4 hrs\\nTesting & debugging 2–3 hrs\\nUser guide & handover1–2 hrs\\n[b]Total Estimate 10 – 14 hrs[/b]\\n[i]If Collins requires custom handling via [/i][i]postMessage[/i][i], allow for +3–4 hrs.[/i]\\n[h2][b]5. Timeline[/b][/h2]\\nBased on the 10–14 hour estimate, delivery can be expected within [b]6-8 business days[/b] after project kickoff, depending on client availability for reviews.\\n[h2][b]6. Assumptions & Dependencies[/b][/h2]\\n[ml][ul][li indent=0 align=left]Client provides access to relevant Salesforce sandbox and Collins URLs.[/li][li indent=0 align=left]Collins system supports being opened in a separate window (no technical restrictions like X-Frame-Options).[/li][li indent=0 align=left]Users understand that auto-opening windows may be affected by browser pop-up settings.[/li][/ul][/ml][h2][b]7. Next Steps[/b][/h2]\\n[ml][ul][li indent=0 align=left]Confirm approval of scope and estimate.[/li][li indent=0 align=left]Schedule kickoff session to clarify URLs and booking logic.[/li][li indent=0 align=left]Begin development in agreed Salesforce environment.[/li][/ul][/ml]\",\n  \"Project_Tag__c\": \"foundational-projects&&&third-party-tool-integration;enhancement-expansion-projects&&&feature-enhancement-customization\",\n  \"Sourcing_Mode__c\": \"Manual\",\n  \"Active_Proposal_Count__c\": 2.0,\n  \"Submitted_Date__c\": \"2025-09-07\",\n  \"Balo_Created_Date__c\": \"2025-09-10T09:30:52.665Z\",\n  \"Product__c\": \"service-cloud;mulesoft\",\n  \"Project_ID__c\": \"1757496652163x959963075612246000\",\n  \"Total_Cost_Inc_Fees__c\": 2632.5,\n  \"Expert_Earnings__c\": 2106.0,\n  \"Account\": {\n    \"Balo_Id__c\": \"1750905854904x936663054694652700\"\n  },\n  \"Primary_Contact__r\": {\n    \"Balo_Id__c\": \"1750905753231x285006760500304830\"\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{base_url}}/services/data/{{api_version}}/sobjects/Opportunity/Balo_Id__c/1755571750663x824457054252695600",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "services",
+            "data",
+            "{{api_version}}",
+            "sobjects",
+            "Opportunity",
+            "Balo_Id__c",
+            "1755571750663x824457054252695600"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "🧪 Test | Consultations",
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"Opportunity__r\": {\n    \"Balo_Id__c\": \"1756952613970x906473785135202300\"\n  },\n  \"Expert__r\": {\n    \"Balo_Id__c\": \"1738195637423x444845305090315200\"\n  },\n  \"Scheduled_DateTime__c\": \"2025-09-29T14:44:03.219Z\",\n  \"Start_Time__c\": \"2025-09-10T03:00:00.000Z\",\n  \"End_Time__c\": \"2025-09-10T03:30:00.000Z\",\n  \"Actual_End_Time__c\": \"2025-09-10T03:14:24.508Z\",\n  \"Duration_Minutes__c\": 30.0,\n  \"Actual_Duration_Minutes__c\": 15.0,\n  \"Status__c\": \"Completed\",\n  \"Billing_Mode__c\": \"Metered\",\n  \"Expert_Rate__c\": 4.0,\n  \"Estimated_Cost__c\": 150.0,\n  \"Final_Cost__c\": 82.5,\n  \"GST_Amount__c\": 7.5,\n  \"Cancellation_Allowed__c\": \"2025-09-10T02:45:00.000Z\",\n  \"Client_Join_Time__c\": \"2025-09-10T03:01:02.943Z\",\n  \"Expert_Join_Time__c\": \"2025-09-10T03:00:59.086Z\",\n  \"Ended_By_Expert__c\": \"2025-09-10T03:14:24.003Z\",\n  \"Ended_By_Client__c\": \"2025-09-10T03:14:22.177Z\",\n  \"Balo_Created_Date__c\": \"2025-09-29T14:44:03.219Z\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{base_url}}/services/data/{{api_version}}/sobjects/Consultation__c/Balo_Id__c/1759157043204x758410607374497200",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "services",
+            "data",
+            "{{api_version}}",
+            "sobjects",
+            "Consultation__c",
+            "Balo_Id__c",
+            "1759157043204x758410607374497200"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "🧪 Test | Project / Invited Experts",
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"Expert_EOI_Status__c\": \"finalized\",\n  \"Amount__c\": \"10000\",\n  \"Opportunity__r\": {\n    \"Balo_Id__c\": \"1755571750663x824457054252695600\"\n  },\n  \"Expert__r\": {\n    \"Balo_Id__c\": \"1755202311799x142104352874200750\"\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{base_url}}/services/data/{{api_version}}/sobjects/Project__c/Balo_Id__c/1755571750663x824457054252695600-1755202311799x142104352874200750",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "services",
+            "data",
+            "{{api_version}}",
+            "sobjects",
+            "Project__c",
+            "Balo_Id__c",
+            "1755571750663x824457054252695600-1755202311799x142104352874200750"
+          ]
+        }
+      },
+      "response": []
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "packages": {},
+        "requests": {},
+        "exec": [
+          ""
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "packages": {},
+        "requests": {},
+        "exec": [
+          ""
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "https://balo.my.salesforce.com",
+      "description": "Salesforce instance URL"
+    },
+    {
+      "key": "api_version",
+      "value": "v65.0",
+      "description": "Salesforce API version"
+    },
+    {
+      "key": "access_token",
+      "value": "",
+      "description": "OAuth bearer token — populate after running Get Token"
+    },
+    {
+      "key": "client_id",
+      "value": "3MVG9uk_cDhyHiA75MtohSbrbc0SsYrbFjtvHzNyrdS_mmh_3gvg5eMN3tnKnmjxPcbyvoL4M1RF6AmMsyJDE",
+      "description": "Connected App client ID"
+    },
+    {
+      "key": "client_secret",
+      "value": "F213CF5CB1598162C4F83182707042022CE72C43C9AEA247265FB0D5C431069E",
+      "description": "Connected App client secret"
+    },
+    {
+      "key": "sf_username",
+      "value": "nforsyth@getbalo.com",
+      "description": "Salesforce username"
+    },
+    {
+      "key": "sf_password",
+      "value": "ty4sjkv6",
+      "description": "Salesforce password"
+    },
+    {
+      "key": "last_prospect_id",
+      "value": ""
+    },
+    {
+      "key": "last_account_id",
+      "value": ""
+    },
+    {
+      "key": "last_contact_id",
+      "value": ""
+    }
+  ]
+}
