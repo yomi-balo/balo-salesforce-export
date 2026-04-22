@@ -58,6 +58,8 @@ class SyncLog:
         os.makedirs(os.path.dirname(db_path) or ".", exist_ok=True)
         self._conn = sqlite3.connect(db_path)
         self._conn.row_factory = sqlite3.Row
+        # WAL lets inspect.py read while sync.py is mid-run.
+        self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.executescript(_SCHEMA)
         self._conn.commit()
 
@@ -202,17 +204,26 @@ class SyncLog:
         self._conn.commit()
 
     def latest_cursor(self, route: str) -> str | None:
-        """completed_at of the most recent finished run for this route, or None."""
+        """started_at of the most recent **completed** run for this route.
+
+        Using started_at (not completed_at) closes a race: if a row is
+        modified in Bubble mid-run, after the fetcher has already pulled
+        that table, a completed_at-based cursor would miss it next run.
+        started_at is always <= the timestamps of every Bubble record the
+        fetch could have included, so any mid-run modification gets picked
+        up next time. Already-sent rows are then short-circuited by
+        already_sent().
+        """
         row = self._conn.execute(
             """
-            SELECT completed_at FROM sync_runs
+            SELECT started_at FROM sync_runs
              WHERE route = ? AND completed_at IS NOT NULL
-             ORDER BY completed_at DESC
+             ORDER BY started_at DESC
              LIMIT 1
             """,
             (route,),
         ).fetchone()
-        return row["completed_at"] if row else None
+        return row["started_at"] if row else None
 
 
 @contextmanager

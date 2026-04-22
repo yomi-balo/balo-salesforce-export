@@ -27,7 +27,15 @@ from src.sync_log import SyncLog
 
 
 class SenderError(RuntimeError):
-    """Raised when a middleware request fails after all retries."""
+    """Raised when a middleware request fails after all retries.
+
+    status_code is the last observed HTTP status when known (set for 401,
+    404, and 5xx-exhausted paths); None for network-error exhaustion.
+    """
+
+    def __init__(self, message: str, status_code: int | None = None):
+        super().__init__(message)
+        self.status_code = status_code
 
 
 class Sender:
@@ -172,7 +180,7 @@ class Sender:
             duration_ms = int((time.monotonic() - started) * 1000)
             self.log.update_result(
                 event_id,
-                http_status=getattr(exc, "status_code", None),
+                http_status=exc.status_code,
                 job_id=None,
                 response_body=str(exc)[:2000],
                 duration_ms=duration_ms,
@@ -220,6 +228,7 @@ class Sender:
         json_body: dict,
     ) -> requests.Response:
         last_exc: Exception | None = None
+        last_status: int | None = None
 
         for attempt in range(MIDDLEWARE_MAX_RETRIES):
             self._throttle()
@@ -234,7 +243,9 @@ class Sender:
             except (requests.ConnectionError, requests.Timeout) as exc:
                 last_exc = exc
                 wait = MIDDLEWARE_BACKOFF_BASE ** attempt
-                if self.verbose:
+                # Always print after attempt 3 so the operator can Ctrl-C
+                # instead of waiting out the full 1+2+4+8+16s backoff.
+                if self.verbose or attempt >= 2:
                     print(
                         f"  [WARN] network error ({exc.__class__.__name__}), retry in {wait}s "
                         f"(attempt {attempt + 1}/{MIDDLEWARE_MAX_RETRIES})",
@@ -245,14 +256,19 @@ class Sender:
 
             if resp.status_code == 401:
                 raise SenderError(
-                    "401 from middleware — MIDDLEWARE_API_SECRET is invalid"
+                    "401 from middleware — MIDDLEWARE_API_SECRET is invalid",
+                    status_code=401,
                 )
             if resp.status_code == 404:
-                raise SenderError(f"404 from middleware — route not found: {url}")
+                raise SenderError(
+                    f"404 from middleware — route not found: {url}",
+                    status_code=404,
+                )
 
             if resp.status_code >= 500:
+                last_status = resp.status_code
                 wait = MIDDLEWARE_BACKOFF_BASE ** attempt
-                if self.verbose:
+                if self.verbose or attempt >= 2:
                     print(
                         f"  [WARN] {resp.status_code} from middleware, retry in {wait}s "
                         f"(attempt {attempt + 1}/{MIDDLEWARE_MAX_RETRIES})",
@@ -264,8 +280,14 @@ class Sender:
             return resp
 
         if last_exc is not None:
-            raise SenderError(f"network error after {MIDDLEWARE_MAX_RETRIES} attempts: {last_exc}")
-        raise SenderError(f"5xx from middleware after {MIDDLEWARE_MAX_RETRIES} attempts")
+            raise SenderError(
+                f"network error after {MIDDLEWARE_MAX_RETRIES} attempts: {last_exc}",
+                status_code=None,
+            )
+        raise SenderError(
+            f"5xx from middleware after {MIDDLEWARE_MAX_RETRIES} attempts",
+            status_code=last_status,
+        )
 
     def _throttle(self) -> None:
         elapsed = time.monotonic() - self._last_request_at

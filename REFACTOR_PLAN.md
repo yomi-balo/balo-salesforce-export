@@ -43,7 +43,7 @@ sync.py (new entry)
          ├── log_send() before POST     → sync.db row, status=pending
          └── log_result() after 202     → fill job_id, http_status
 
-inspect.py <balo_id>                    # query sync.db, pretty-print payload + sources
+sync_inspect.py <balo_id>                    # query sync.db, pretty-print payload + sources
 export.py (kept)                        # XLSX mode, unchanged UX
 ```
 
@@ -82,7 +82,7 @@ CREATE TABLE sync_runs (
 CREATE INDEX idx_sync_runs_route ON sync_runs(route, completed_at);
 ```
 
-`sync_runs` gives the next repeatable run a `modified_since` cursor: `SELECT max(completed_at) FROM sync_runs WHERE route = ? AND completed_at IS NOT NULL`.
+`sync_runs` gives the next repeatable run a `modified_since` cursor: `SELECT started_at FROM sync_runs WHERE route = ? AND completed_at IS NOT NULL ORDER BY started_at DESC LIMIT 1`. (Uses `started_at`, not `completed_at`, so rows modified in Bubble mid-run — after the fetcher already pulled that table — aren't missed on the next run. Already-sent rows are short-circuited by `already_sent`.)
 
 Treat `sync.db` as sensitive — payloads contain real customer data and Cronofy tokens. Local only, already covered by `.gitignore`'s `output/` rule. No scrub pass.
 
@@ -164,11 +164,11 @@ Treat `sync.db` as sensitive — payloads contain real customer data and Cronofy
 
 ### Phase 5 — Inspection CLI
 
-**Done (2026-04-22).** `inspect.py` supports `<balo_id>`, `--status pending|landed|failed`, and `<balo_id> --refetch` (Bubble refetch + drift flag against event `ts`).
+**Done (2026-04-22).** `sync_inspect.py` supports `<balo_id>`, `--status pending|landed|failed`, and `<balo_id> --refetch` (Bubble refetch + drift flag against event `ts`).
 
-- `inspect.py <balo_id>` → show sync.db row: route, ts, http_status, job_id, full payload (pretty), source table list.
-- `inspect.py --status failed` / `--status pending` → list.
-- `inspect.py <balo_id> --refetch` → pull current state of each source record from Bubble and diff against the logged payload (answers "has the data drifted since we sent?").
+- `sync_inspect.py <balo_id>` → show sync.db row: route, ts, http_status, job_id, full payload (pretty), source table list.
+- `sync_inspect.py --status failed` / `--status pending` → list.
+- `sync_inspect.py <balo_id> --refetch` → pull current state of each source record from Bubble and diff against the logged payload (answers "has the data drifted since we sent?").
 
 ## Explicitly out of scope
 

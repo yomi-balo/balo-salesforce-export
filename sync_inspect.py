@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 """Inspect sync.db — the log of every payload sent to sf-middleware-api.
 
-    python inspect.py <balo_id>
+    python sync_inspect.py <balo_id>
         Show every event recorded for this balo_id (newest first): ts, route,
         http_status, sf_status, jobId, pretty-printed payload, source records
         that were read to build it.
 
-    python inspect.py <balo_id> --refetch
+    python sync_inspect.py <balo_id> --refetch
         Above, plus: re-fetch each source record from Bubble now and flag
         whichever ones have a Modified Date newer than the event's ts ("has
         the data drifted since we sent?"). Prints the current raw source JSON
         so the operator can diff by eye. Requires BALO_API_TOKEN.
 
-    python inspect.py --status pending|landed|failed
+    python sync_inspect.py --status pending|landed|failed
         List every sync_events row with that sf_status.
 
 The sf_status column starts as 'pending' on every send and is updated to

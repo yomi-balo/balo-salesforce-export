@@ -66,7 +66,7 @@ Transformers assume this layout — if you add a new entity, match the pattern o
 
 ## Reference docs in this repo
 
-- `REFACTOR_PLAN.md` — in-progress plan to extend this tool from XLSX-export into a full historic Bubble→middleware→Salesforce sync with SQLite sync log and `inspect.py` CLI. Read this first if the task involves sync, sender, sync.db, or provenance logging.
+- `REFACTOR_PLAN.md` — in-progress plan to extend this tool from XLSX-export into a full historic Bubble→middleware→Salesforce sync with SQLite sync log and `sync_inspect.py` CLI. Read this first if the task involves sync, sender, sync.db, or provenance logging.
 - `FIELD_MAPPING.md` — canonical Bubble-field → Salesforce-field mapping per endpoint. Source of truth for transformer logic.
 - `MIDDLEWARE_ENDPOINTS.md` — maps each `transform_*` function to the `sf-middleware-api` route it feeds. Consult when the tool is extended to POST through the middleware instead of emitting XLSX.
 - `EXPORT_FORMAT.md` — describes the legacy 6-CSV layout; the current tool emits one XLSX with equivalent sheets.

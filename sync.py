@@ -69,6 +69,12 @@ TARGETS = {
             "timezone", "currencyCode", "country",
             "baloAccountId", "companyName", "accountType", "baloAccountCreatedDate",
         ],
+        # Freelance experts omit these entirely (MIDDLEWARE_ENDPOINTS.md §1).
+        # Under the current CLIENT filter this path is unreachable, but leaving
+        # the guard in means a filter change can't silently produce a bad body.
+        "omit_if_empty": (
+            "baloAccountId", "companyName", "accountType", "baloAccountCreatedDate",
+        ),
         "sender_method": "send_prospect",
         "label": "Client signups → POST /crm/prospect",
     },
@@ -103,6 +109,10 @@ TARGETS = {
             "Application_Status__c", "Expert_Unique_ID__c", "Cronofy_User_ID__c",
             "MailingCountry", "Account.Balo_Id__c",
         ],
+        # Freelance experts have no agency; sending an empty Account.Balo_Id__c
+        # makes the middleware try to resolve "" as an external id and fail
+        # (MIDDLEWARE_ENDPOINTS.md §3 — omit entirely).
+        "omit_if_empty": ("Account.Balo_Id__c",),
         "sender_method": "send_contact",
         "label": "Expert Contacts → PATCH /crm/contact/:id",
     },
@@ -173,13 +183,29 @@ TARGETS = {
 }
 
 
-def _build_payload(row, payload_keys):
+_URL_ONLY_KEYS = ("Balo_Id__c", "Balo_Case_Number__c")
+
+
+def _build_payload(row, payload_keys, omit_if_empty=()):
     """Return the subset of row restricted to payload_keys, in that order.
 
-    Empty string values are kept (per MIDDLEWARE_ENDPOINTS.md most endpoints
-    accept empty strings for unset fields). Missing keys default to "".
+    Empty-string values are kept by default (most middleware endpoints accept
+    "" as a null/unset signal). Keys listed in omit_if_empty are dropped
+    entirely when their value is empty — needed for fields that the middleware
+    treats as external-id lookups (e.g. Account.Balo_Id__c on a freelance
+    expert Contact: "" would make SF try to resolve an empty external id).
     """
-    return {k: row.get(k, "") for k in payload_keys}
+    for k in _URL_ONLY_KEYS:
+        assert k not in payload_keys, (
+            f"{k} is URL-only per MIDDLEWARE_ENDPOINTS.md — remove from payload_keys"
+        )
+    out = {}
+    for k in payload_keys:
+        v = row.get(k, "")
+        if v == "" and k in omit_if_empty:
+            continue
+        out[k] = v
+    return out
 
 
 def _log(msg):
@@ -253,7 +279,11 @@ def run_target(target_key: str, args) -> int:
                 )
                 continue
 
-            payload = _build_payload(row, target["payload_keys"])
+            payload = _build_payload(
+                row,
+                target["payload_keys"],
+                omit_if_empty=target.get("omit_if_empty", ()),
+            )
 
             before_sent = sender.sent_count
             try:
@@ -302,9 +332,14 @@ def _run_notes(args) -> str:
 def _print_list():
     print("sync.py targets:")
     print()
-    width = max(len(k) for k in TARGETS) + 2
+    key_w = max(len(k) for k in TARGETS) + 2
+    route_w = max(len(t["route_template"]) for t in TARGETS.values()) + 2
     for key, target in TARGETS.items():
-        print(f"  {key.ljust(width)}{target['label']}")
+        print(
+            f"  {key.ljust(key_w)}"
+            f"{target['route_template'].ljust(route_w)}"
+            f"{target['label']}"
+        )
     print()
     print("Common flags: --limit N | --dry-run | --since <iso-datetime> | --full | -v")
 
