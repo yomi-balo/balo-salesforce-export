@@ -62,6 +62,23 @@ def _expert_user_id(expert_uid, store):
     return _safe_get(expert, "User", "")
 
 
+def _user_email(user):
+    """Bubble exposes user email at user.authentication.email.email (see
+    balo-bubble-data-api-swagger.json). _redact wipes the whole authentication
+    object, so email must be pulled out BEFORE redaction runs.
+    """
+    if not user:
+        return ""
+    auth = user.get("authentication")
+    if isinstance(auth, dict):
+        em = auth.get("email")
+        if isinstance(em, dict):
+            val = em.get("email")
+            if val:
+                return val
+    return user.get("email") or user.get("Email") or ""
+
+
 def _meeting_type_slug(meeting):
     t = meeting.get("Type")
     if isinstance(t, dict):
@@ -188,10 +205,11 @@ def transform_prospects_contacts(store):
         provenance.append([])
 
         for uid, user in store.users.items():
+            email = _user_email(user)
             user = _redact(user)
             if _safe_get(user, "Company") != cid:
                 continue
-            row, sources = _build_client_prospect_row(user, company, store)
+            row, sources = _build_client_prospect_row(user, email, company, store)
             rows.append(row)
             provenance.append(sources)
 
@@ -206,8 +224,10 @@ def transform_prospects_contacts(store):
             if _safe_get(expert, "Agency") != aid:
                 continue
             user_uid = _safe_get(expert, "User")
-            user = _redact(store.users.get(user_uid, {}))
-            row, sources = _build_expert_prospect_row(user, expert, agency_name, aid, "Expert", agency, store)
+            raw_user = store.users.get(user_uid, {})
+            email = _user_email(raw_user)
+            user = _redact(raw_user)
+            row, sources = _build_expert_prospect_row(user, email, expert, agency_name, aid, "Expert", agency, store)
             rows.append(row)
             provenance.append(sources)
 
@@ -219,20 +239,22 @@ def transform_prospects_contacts(store):
         if expert_type != "freelancer":
             continue
         user_uid = _safe_get(expert, "User")
-        user = _redact(store.users.get(user_uid, {}))
-        row, sources = _build_expert_prospect_row(user, expert, "", "", "", None, store)
+        raw_user = store.users.get(user_uid, {})
+        email = _user_email(raw_user)
+        user = _redact(raw_user)
+        row, sources = _build_expert_prospect_row(user, email, expert, "", "", "", None, store)
         rows.append(row)
         provenance.append(sources)
 
     return columns, rows, provenance
 
 
-def _build_client_prospect_row(user, company, store):
+def _build_client_prospect_row(user, email, company, store):
     row = {
         "_group": _safe_get(company, "Name"),
         "_contact_type": "CLIENT",
         "baloId": _safe_get(user, "_id"),
-        "email": _safe_get(user, "email", _safe_get(user, "Email")),
+        "email": email,
         "firstName": _safe_get(user, "Name: First"),
         "lastName": _safe_get(user, "Name: Last"),
         "phone": _safe_get(user, "Phone"),
@@ -268,7 +290,7 @@ def _build_client_prospect_row(user, company, store):
     return row, sources
 
 
-def _build_expert_prospect_row(user, expert, account_name, account_id, account_type, account_record, store):
+def _build_expert_prospect_row(user, email, expert, account_name, account_id, account_type, account_record, store):
     certs = expert.get("Certifications", expert.get("Case", []))
     # Certifications may be stored as array; check if expert has any certification-related fields
     has_certs = bool(expert.get("Certifications")) or bool(expert.get("Certified Salesforce Trainer?"))
@@ -277,7 +299,7 @@ def _build_expert_prospect_row(user, expert, account_name, account_id, account_t
         "_group": account_name or "Freelance",
         "_contact_type": "EXPERT",
         "baloId": _safe_get(user, "_id"),
-        "email": _safe_get(user, "email", _safe_get(user, "Email")),
+        "email": email,
         "firstName": _safe_get(user, "Name: First"),
         "lastName": _safe_get(user, "Name: Last"),
         "phone": _safe_get(user, "Phone"),
