@@ -62,6 +62,19 @@ def _expert_user_id(expert_uid, store):
     return _safe_get(expert, "User", "")
 
 
+def _freelance_account_name(user):
+    """Synthetic SF Account Name for a freelance expert (e.g. 'David Chui (Freelance)').
+
+    Freelance experts have no agency; we mint one Account per expert so the
+    Contact has something to link to. `user` here is the profile_expert's
+    linked user record (post-_redact is fine — Name fields aren't sensitive).
+    """
+    first = _safe_get(user, "Name: First").strip()
+    last = _safe_get(user, "Name: Last").strip()
+    name = f"{first} {last}".strip() or _safe_get(user, "_id", "unknown")
+    return f"{name} (Freelance)"
+
+
 def _user_email(user):
     """Bubble exposes user email at user.authentication.email.email (see
     balo-bubble-data-api-swagger.json). _redact wipes the whole authentication
@@ -173,6 +186,37 @@ def transform_accounts(store):
             _src("user", admin_uid, "admin (Phone)"),
         ))
 
+    # Freelance experts — one synthetic Account per expert so freelance
+    # Contacts have an Account to link to. Balo_Id__c = profile_expert._id.
+    rows.append(_separator_row("Freelance Experts (synthetic accounts)"))
+    provenance.append([])
+    for eid, expert in store.experts.items():
+        if get_slug(expert.get("Expert type")) != "freelancer":
+            continue
+        user_uid = _safe_get(expert, "User")
+        user = store.users.get(user_uid, {})
+
+        rows.append({
+            "_group": "FREELANCE",
+            "Balo_Id__c": expert["_id"],
+            "Name": _freelance_account_name(user),
+            "Phone": _safe_get(user, "Phone"),
+            "Website": "",
+            "Type": "Expert",
+            "AccountSource": ACCOUNT_SOURCE,
+            "Stripe_Customer_Id__c": "",
+            "Has_Booked_Consultation__c": "",
+            "Has_Redeemed_Credits__c": "",
+            "Has_Submitted_Project__c": "",
+            "Balo_Created_Date__c": _safe_get(expert, "Created Date"),
+            "Stripe_Seller_ID__c": "",
+            "Stripe_Connection_Status__c": "",
+        })
+        provenance.append(_sources(
+            _src("profile_expert", expert["_id"], "primary"),
+            _src("user", user_uid, "user (Phone, Name)"),
+        ))
+
     return columns, rows, provenance
 
 
@@ -197,6 +241,14 @@ def transform_prospects_contacts(store):
     rows = []
     provenance = []
 
+    # Users that back a profile_expert record route via /crm/account + /crm/contact,
+    # NOT /crm/prospect — even if they also have a client Company link.
+    expert_user_ids = {
+        expert.get("User")
+        for expert in store.experts.values()
+        if expert.get("User")
+    }
+
     # --- Client users grouped by company ---
     for company in store.clientcompanies:
         cid = company["_id"]
@@ -205,6 +257,8 @@ def transform_prospects_contacts(store):
         provenance.append([])
 
         for uid, user in store.users.items():
+            if uid in expert_user_ids:
+                continue  # routed as expert (Account + Contact), not prospect
             email = _user_email(user)
             user = _redact(user)
             if _safe_get(user, "Company") != cid:
@@ -242,7 +296,13 @@ def transform_prospects_contacts(store):
         raw_user = store.users.get(user_uid, {})
         email = _user_email(raw_user)
         user = _redact(raw_user)
-        row, sources = _build_expert_prospect_row(user, email, expert, "", "", "", None, store)
+        # Per-expert synthetic Account — Balo_Id__c = profile_expert._id.
+        # The corresponding Account row is emitted by transform_accounts.
+        synth_name = _freelance_account_name(user)
+        synth_id = expert["_id"]
+        row, sources = _build_expert_prospect_row(
+            user, email, expert, synth_name, synth_id, "Expert", None, store
+        )
         rows.append(row)
         provenance.append(sources)
 
