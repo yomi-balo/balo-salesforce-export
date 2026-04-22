@@ -88,7 +88,8 @@ def main():
 
     sheets_data = transform_all(store)
 
-    for name, (cols, rows) in sheets_data.items():
+    for name, data in sheets_data.items():
+        cols, rows = data[0], data[1]
         data_rows = [r for r in rows if not r.get("_is_separator")]
         print(f"  {name}: {len(data_rows)} rows, {len(cols)} columns", file=sys.stderr)
     print(file=sys.stderr)

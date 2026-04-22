@@ -9,3 +9,6 @@ output/
 
 # OS
 .DS_Store
+
+# Tooling
+.claude/

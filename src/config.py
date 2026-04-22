@@ -14,6 +14,19 @@ if not BALO_API_TOKEN:
 
 BASE_URL = "https://balo.expert/api/1.1"
 
+# --- Middleware (sf-middleware-api) ---
+MIDDLEWARE_URL = os.getenv(
+    "MIDDLEWARE_URL",
+    "https://sf-middleware-api-production.up.railway.app",
+).rstrip("/")
+MIDDLEWARE_API_SECRET = os.getenv("MIDDLEWARE_API_SECRET")
+
+# Throttle between middleware POSTs. 100ms is the MIDDLEWARE_ENDPOINTS.md recommendation.
+MIDDLEWARE_MIN_INTERVAL = float(os.getenv("MIDDLEWARE_MIN_INTERVAL", "0.1"))
+MIDDLEWARE_MAX_RETRIES = 5
+MIDDLEWARE_BACKOFF_BASE = 2
+MIDDLEWARE_TIMEOUT = 30
+
 # --- Optional record IDs from env ---
 def _parse_ids(key):
     val = os.getenv(key, "").strip()
