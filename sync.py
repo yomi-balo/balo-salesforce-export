@@ -75,6 +75,12 @@ TARGETS = {
         "omit_if_empty": (
             "baloAccountId", "companyName", "accountType", "baloAccountCreatedDate",
         ),
+        # /crm/prospect is handled by Apex REST, which treats "" and null
+        # differently — Apex validation / type coercion can 500 on empty
+        # strings that it would tolerate as null. Drop every empty-string
+        # key from the body. The PATCH routes below keep "" as a legitimate
+        # "clear this field" signal, so this flag is target-scoped.
+        "omit_empty_strings": True,
         "sender_method": "send_prospect",
         "label": "Client signups → POST /crm/prospect",
     },
@@ -186,14 +192,19 @@ TARGETS = {
 _URL_ONLY_KEYS = ("Balo_Id__c", "Balo_Case_Number__c")
 
 
-def _build_payload(row, payload_keys, omit_if_empty=()):
+def _build_payload(row, payload_keys, omit_if_empty=(), omit_empty_strings=False):
     """Return the subset of row restricted to payload_keys, in that order.
 
-    Empty-string values are kept by default (most middleware endpoints accept
-    "" as a null/unset signal). Keys listed in omit_if_empty are dropped
-    entirely when their value is empty — needed for fields that the middleware
-    treats as external-id lookups (e.g. Account.Balo_Id__c on a freelance
-    expert Contact: "" would make SF try to resolve an empty external id).
+    Empty-string values are kept by default — PATCH routes use "" as a
+    "clear this field" signal (see MIDDLEWARE_ENDPOINTS.md §6 request-only
+    variant). Two ways to drop them:
+
+    - omit_if_empty: drop only the listed keys when empty (targeted use —
+      e.g. Account.Balo_Id__c on a freelance Contact must be omitted, not
+      "", or SF tries to resolve "" as an external id).
+    - omit_empty_strings=True: drop every empty-string key. Needed for the
+      /crm/prospect Apex endpoint, which 500s on "" where it would accept
+      null.
     """
     for k in _URL_ONLY_KEYS:
         assert k not in payload_keys, (
@@ -202,7 +213,7 @@ def _build_payload(row, payload_keys, omit_if_empty=()):
     out = {}
     for k in payload_keys:
         v = row.get(k, "")
-        if v == "" and k in omit_if_empty:
+        if v == "" and (omit_empty_strings or k in omit_if_empty):
             continue
         out[k] = v
     return out
@@ -283,6 +294,7 @@ def run_target(target_key: str, args) -> int:
                 row,
                 target["payload_keys"],
                 omit_if_empty=target.get("omit_if_empty", ()),
+                omit_empty_strings=target.get("omit_empty_strings", False),
             )
 
             before_sent = sender.sent_count
