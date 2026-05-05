@@ -2,6 +2,7 @@ from src.config import (
     get_slug,
     get_display,
     join_array_slugs,
+    list_array_slugs,
     PROSPECT_STATUS,
     ACCOUNT_SOURCE,
     RECORD_TYPE_EXPERT_CONTACT,
@@ -9,6 +10,7 @@ from src.config import (
     RECORD_TYPE_CASE_OPPORTUNITY,
     RECORD_TYPE_PROJECT_OPPORTUNITY,
     SENSITIVE_FIELDS,
+    EXPERT_OR_ADMIN_ROLES,
 )
 
 
@@ -137,8 +139,18 @@ def transform_accounts(store):
         admin_uid = _safe_get(company, "Admin")
         admin_user = store.users.get(admin_uid, {}) if admin_uid else {}
 
+        # A company is "real" if at least one user has pure client roles (no expert roles).
+        company_users = [u for u in store.users.values() if u.get("Company") == company["_id"]]
+        has_real_client = any(
+            not EXPERT_OR_ADMIN_ROLES.intersection(list_array_slugs(u.get("Roles", [])))
+            for u in company_users
+        ) if company_users else False
+
         rows.append({
             "_group": "CLIENT",
+            "_has_real_client": has_real_client,
+            "_admin_roles": list_array_slugs(admin_user.get("Roles", [])),
+            "_admin_email": _safe_get(admin_user, "email", _safe_get(admin_user, "Email")),
             "Balo_Id__c": company["_id"],
             "Name": _safe_get(company, "Name"),
             "Phone": _safe_get(admin_user, "Phone"),
@@ -167,6 +179,8 @@ def transform_accounts(store):
 
         rows.append({
             "_group": "AGENCY",
+            "_admin_roles": list_array_slugs(admin_user.get("Roles", [])),
+            "_admin_email": _safe_get(admin_user, "email", _safe_get(admin_user, "Email")),
             "Balo_Id__c": agency["_id"],
             "Name": _safe_get(agency, "Name"),
             "Phone": _safe_get(admin_user, "Phone"),
@@ -319,7 +333,7 @@ def _build_client_prospect_row(user, email, company, store):
         "lastName": _safe_get(user, "Name: Last"),
         "phone": _safe_get(user, "Phone"),
         "baloRole": get_slug(user.get("Role: Active")),
-        "baloRoles": join_array_slugs(user.get("Roles", [])),
+        "baloRoles": list_array_slugs(user.get("Roles", [])),
         "prospectStatus": PROSPECT_STATUS,
         "signupDate": _safe_get(user, "Created Date"),
         "timezone": _safe_get(user, "⚙️ Timezone ID"),
@@ -327,7 +341,7 @@ def _build_client_prospect_row(user, email, company, store):
         "country": _resolve_country(_safe_get(user, "⚙️ Country"), store, "Name"),
         "baloAccountId": company["_id"],
         "companyName": _safe_get(company, "Name"),
-        "accountType": "Company",
+        "accountType": "Prospect",
         "baloAccountCreatedDate": _safe_get(company, "Created Date"),
         "RecordTypeId": RECORD_TYPE_CLIENT_CONTACT,
         "Expert_Type__c": "", "Is_Salesforce_Certified__c": "",
@@ -364,7 +378,7 @@ def _build_expert_prospect_row(user, email, expert, account_name, account_id, ac
         "lastName": _safe_get(user, "Name: Last"),
         "phone": _safe_get(user, "Phone"),
         "baloRole": get_slug(user.get("Role: Active")),
-        "baloRoles": join_array_slugs(user.get("Roles", [])),
+        "baloRoles": list_array_slugs(user.get("Roles", [])),
         "prospectStatus": PROSPECT_STATUS,
         "signupDate": _safe_get(user, "Created Date"),
         "timezone": _safe_get(user, "⚙️ Timezone ID"),

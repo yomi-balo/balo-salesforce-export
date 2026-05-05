@@ -37,8 +37,10 @@ On failure:
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import time
+from datetime import date, datetime, timedelta, timezone
 
 from src.sync_log import SyncLog, open_log
 
@@ -49,46 +51,64 @@ from src.sync_log import SyncLog, open_log
 #   route_template  — path with ":id" placeholder; used as sync_runs.route key
 #                     (the cursor is stored per template, not per exact URL).
 #   transformer     — which transform_* function to invoke.
-#   row_filter      — predicate applied to each non-separator row.
+#   row_checks      — list of (reason, check_fn) tuples. Each check_fn takes a
+#                     row dict and returns True if the row passes. The first
+#                     failing check's reason is logged in the audit report.
 #   url_key         — column whose value becomes the URL id (and the balo_id
 #                     we pass to Sender / sync.db).
+#   name_key        — tuple of column names used to build a human-readable label
+#                     for the audit report (e.g. ("firstName", "lastName", "email")).
 #   payload_keys    — exact list of columns to include in the outgoing JSON.
 #                     Source of truth is MIDDLEWARE_ENDPOINTS.md; keep in sync.
 #   sender_method   — method name on Sender to call.
 #   label           — human-readable tag for logs.
 
+from src.config import EXPERT_OR_ADMIN_ROLES
+
+# Test/internal emails — same list as the middleware (processor.ts BLOCKED_EMAIL_PATTERNS).
+BLOCKED_EMAIL_PATTERNS = ("@revido.io", "ylinkz", "yomi@getbalo.com")
+
+
+def _is_blocked_email(row, field="email"):
+    email = (row.get(field) or "").lower()
+    return any(p in email for p in BLOCKED_EMAIL_PATTERNS)
+
+
 TARGETS = {
     "prospects": {
         "route_template": "/crm/prospect",
         "transformer": "transform_prospects_contacts",
-        "row_filter": lambda r: r.get("_contact_type") == "CLIENT",
+        "row_checks": [
+            ("not a CLIENT row", lambda r: r.get("_contact_type") == "CLIENT"),
+            ("has expert/admin role", lambda r: not EXPERT_OR_ADMIN_ROLES.intersection(r.get("baloRoles", []))),
+            ("blocked test email", lambda r: not _is_blocked_email(r)),
+        ],
         "url_key": "baloId",
+        "name_key": ("firstName", "lastName", "email"),
         "payload_keys": [
             "baloId", "email", "firstName", "lastName", "phone",
             "baloRole", "baloRoles", "prospectStatus", "signupDate",
             "timezone", "currencyCode", "country",
             "baloAccountId", "companyName", "accountType", "baloAccountCreatedDate",
         ],
-        # Freelance experts omit these entirely (MIDDLEWARE_ENDPOINTS.md §1).
-        # Under the current CLIENT filter this path is unreachable, but leaving
-        # the guard in means a filter change can't silently produce a bad body.
         "omit_if_empty": (
             "baloAccountId", "companyName", "accountType", "baloAccountCreatedDate",
         ),
-        # /crm/prospect is handled by Apex REST, which treats "" and null
-        # differently — Apex validation / type coercion can 500 on empty
-        # strings that it would tolerate as null. Drop every empty-string
-        # key from the body. The PATCH routes below keep "" as a legitimate
-        # "clear this field" signal, so this flag is target-scoped.
-        "omit_empty_strings": True,
+        "nullify_empty_strings": True,
         "sender_method": "send_prospect",
         "label": "Client signups → POST /crm/prospect",
     },
     "accounts": {
         "route_template": "/crm/account/:id",
         "transformer": "transform_accounts",
-        "row_filter": lambda r: True,
+        "row_checks": [
+            ("blocked admin email", lambda r: not _is_blocked_email(r, "_admin_email")),
+            ("no real client users (expert-only dummy company)", lambda r: (
+                r.get("_group") != "CLIENT" or r.get("_has_real_client", True)
+            )),
+        ],
         "url_key": "Balo_Id__c",
+        "name_key": ("Name",),
         "payload_keys": [
             "Name", "Phone", "Website", "Type", "AccountSource",
             "Stripe_Customer_Id__c", "Has_Booked_Consultation__c",
@@ -102,11 +122,18 @@ TARGETS = {
     "contacts": {
         "route_template": "/crm/contact/:id",
         "transformer": "transform_prospects_contacts",
-        # Experts only. Client Contacts are created atomically by the
-        # /crm/prospect Apex call in Phase 1.
-        "row_filter": lambda r: r.get("_contact_type") == "EXPERT",
+        "row_checks": [
+            ("not an EXPERT row", lambda r: r.get("_contact_type") == "EXPERT"),
+            ("no expert role in user Roles", lambda r: bool(
+                EXPERT_OR_ADMIN_ROLES.intersection(r.get("baloRoles", []))
+            )),
+            ("profile not approved", lambda r: r.get("Application_Status__c") == "approved"),
+            ("blocked test email", lambda r: not _is_blocked_email(r)),
+        ],
         "url_key": "baloId",
+        "name_key": ("firstName", "lastName", "email"),
         "payload_keys": [
+            "firstName", "lastName", "email",
             "RecordTypeId", "Expert_Type__c", "Is_Salesforce_Certified__c",
             "Is_CTA__c", "Is_MVP__c", "Salesforce_Start_Year__c",
             "Years_Experience__c", "Project_Count_Range__c",
@@ -115,9 +142,7 @@ TARGETS = {
             "Application_Status__c", "Expert_Unique_ID__c", "Cronofy_User_ID__c",
             "MailingCountry", "Account.Balo_Id__c",
         ],
-        # Freelance experts have no agency; sending an empty Account.Balo_Id__c
-        # makes the middleware try to resolve "" as an external id and fail
-        # (MIDDLEWARE_ENDPOINTS.md §3 — omit entirely).
+        "key_map": {"firstName": "FirstName", "lastName": "LastName", "email": "Email"},
         "omit_if_empty": ("Account.Balo_Id__c",),
         "sender_method": "send_contact",
         "label": "Expert Contacts → PATCH /crm/contact/:id",
@@ -125,9 +150,9 @@ TARGETS = {
     "cases": {
         "route_template": "/crm/opportunity/case/:id",
         "transformer": "transform_opportunities_cases",
-        "row_filter": lambda r: True,
-        # Cases use Balo_Case_Number__c in the URL, not Balo_Id__c.
+        "row_checks": [],
         "url_key": "Balo_Case_Number__c",
+        "name_key": ("Name",),
         "payload_keys": [
             "Name", "CloseDate", "StageName", "RecordTypeId", "Description",
             "Total_Consultation_Minutes__c", "Total_Credits_Used__c", "Amount",
@@ -135,14 +160,23 @@ TARGETS = {
             "Account.Balo_Id__c", "Primary_Contact__r.Balo_Id__c",
             "Expert__r.Balo_Id__c",
         ],
+        "defaults": {"CloseDate": lambda: (date.today() + timedelta(days=365)).isoformat()},
+        "omit_if_empty": (
+            "Amount", "Total_Consultation_Minutes__c",
+            "Total_Credits_Used__c", "Expert__r.Balo_Id__c",
+            "Account.Balo_Id__c", "Primary_Contact__r.Balo_Id__c",
+        ),
         "sender_method": "send_opportunity_case",
         "label": "Case Opportunities → PATCH /crm/opportunity/case/:id",
     },
     "projects": {
         "route_template": "/crm/opportunity/project/:id",
         "transformer": "transform_opportunities_projects",
-        "row_filter": lambda r: True,
+        "row_checks": [
+            ("empty Name (incomplete draft)", lambda r: bool(r.get("Name"))),
+        ],
         "url_key": "Balo_Id__c",
+        "name_key": ("Name",),
         "payload_keys": [
             "Name", "CloseDate", "StageName", "Sub_status__c", "RecordTypeId",
             "Description", "Project_Tag__c", "Sourcing_Mode__c", "Package__c",
@@ -152,14 +186,24 @@ TARGETS = {
             "Expert_Earnings__c", "Account.Balo_Id__c",
             "Primary_Contact__r.Balo_Id__c", "Related_Case__r.Balo_Id__c",
         ],
+        "defaults": {"CloseDate": lambda: (date.today() + timedelta(days=365)).isoformat()},
+        "omit_if_empty": (
+            "Submitted_Date__c", "Total_Cost_Inc_Fees__c",
+            "GST_Charged__c", "Expert_Earnings__c", "Active_Proposal_Count__c",
+            "Project_ID__c", "Related_Case__r.Balo_Id__c",
+            "Account.Balo_Id__c", "Primary_Contact__r.Balo_Id__c",
+        ),
         "sender_method": "send_opportunity_project",
         "label": "Project Opportunities → PATCH /crm/opportunity/project/:id",
     },
     "project-experts": {
         "route_template": "/crm/project-expert/:id",
         "transformer": "transform_project_experts",
-        "row_filter": lambda r: bool(r.get("Balo_Id__c")),  # skip rows missing composite id
+        "row_checks": [
+            ("missing composite Balo_Id__c", lambda r: bool(r.get("Balo_Id__c"))),
+        ],
         "url_key": "Balo_Id__c",
+        "name_key": ("Balo_Id__c",),
         "payload_keys": [
             "Expert_EOI_Status__c", "Opportunity__r.Balo_Id__c",
             "Expert__r.Balo_Id__c",
@@ -170,8 +214,9 @@ TARGETS = {
     "consultations": {
         "route_template": "/crm/consultation/:id",
         "transformer": "transform_consultations",
-        "row_filter": lambda r: True,
+        "row_checks": [],
         "url_key": "Balo_Id__c",
+        "name_key": ("Balo_Id__c",),
         "payload_keys": [
             "Opportunity__r.Balo_Id__c", "Project__r.Balo_Id__c",
             "Expert__r.Balo_Id__c", "Scheduled_DateTime__c", "Start_Time__c",
@@ -183,6 +228,14 @@ TARGETS = {
             "Expert_Join_Time__c", "Ended_By_Expert__c", "Ended_By_Client__c",
             "Participants_Present__c", "Balo_Created_Date__c",
         ],
+        "omit_if_empty": (
+            "Opportunity__r.Balo_Id__c", "Project__r.Balo_Id__c",
+            "Expert_Rate__c", "Estimated_Cost__c", "Final_Cost__c",
+            "GST_Amount__c", "Actual_End_Time__c", "Actual_Duration_Minutes__c",
+            "Client_Join_Time__c", "Expert_Join_Time__c",
+            "Ended_By_Expert__c", "Ended_By_Client__c",
+            "Cancellation_Reason__c", "Cancelled_By__c",
+        ),
         "sender_method": "send_consultation",
         "label": "Consultations → PATCH /crm/consultation/:id",
     },
@@ -192,19 +245,26 @@ TARGETS = {
 _URL_ONLY_KEYS = ("Balo_Id__c", "Balo_Case_Number__c")
 
 
-def _build_payload(row, payload_keys, omit_if_empty=(), omit_empty_strings=False):
+def _build_payload(row, payload_keys, omit_if_empty=(), nullify_empty_strings=False,
+                   key_map=None, defaults=None):
     """Return the subset of row restricted to payload_keys, in that order.
 
     Empty-string values are kept by default — PATCH routes use "" as a
     "clear this field" signal (see MIDDLEWARE_ENDPOINTS.md §6 request-only
-    variant). Two ways to drop them:
+    variant). Ways to handle them:
 
     - omit_if_empty: drop only the listed keys when empty (targeted use —
       e.g. Account.Balo_Id__c on a freelance Contact must be omitted, not
       "", or SF tries to resolve "" as an external id).
-    - omit_empty_strings=True: drop every empty-string key. Needed for the
-      /crm/prospect Apex endpoint, which 500s on "" where it would accept
-      null.
+    - nullify_empty_strings=True: convert "" to None (JSON null). Needed
+      for the /crm/prospect Apex endpoint, which 500s on "" but accepts
+      null. Keys are kept in the payload so the Apex class sees them.
+    - defaults: dict of fallback values for required fields that SF rejects
+      when empty (e.g. CloseDate on Opportunity).
+
+    Dot-notation keys (e.g. "Account.Balo_Id__c") are automatically
+    converted to nested objects (e.g. {"Account": {"Balo_Id__c": "..."}})
+    as required by the SF REST API for relationship fields.
     """
     for k in _URL_ONLY_KEYS:
         assert k not in payload_keys, (
@@ -213,9 +273,23 @@ def _build_payload(row, payload_keys, omit_if_empty=(), omit_empty_strings=False
     out = {}
     for k in payload_keys:
         v = row.get(k, "")
-        if v == "" and (omit_empty_strings or k in omit_if_empty):
+        if v == "" and defaults and k in defaults:
+            d = defaults[k]
+            v = d() if callable(d) else d
+        if v == "" and k in omit_if_empty:
             continue
-        out[k] = v
+        if v == "" and nullify_empty_strings:
+            v = None
+        # Rename key if key_map provides a mapping
+        out_key = key_map.get(k, k) if key_map else k
+        # Convert dot-notation to nested objects for SF relationship fields
+        if "." in out_key:
+            parent, child = out_key.split(".", 1)
+            if parent not in out:
+                out[parent] = {}
+            out[parent][child] = v
+        else:
+            out[out_key] = v
     return out
 
 
@@ -231,6 +305,106 @@ def _resolve_cursor(log: SyncLog, route_template: str, args) -> str | None:
     return log.latest_cursor(route_template)
 
 
+def _check_row(row, row_checks):
+    """Run row_checks and return (True, None) if all pass, or (False, reason)."""
+    for reason, check_fn in row_checks:
+        if not check_fn(row):
+            return False, reason
+    return True, None
+
+
+def _build_name(row, name_key):
+    """Build a human-readable label from the row for the audit report."""
+    parts = [str(row.get(k) or "") for k in name_key]
+    return " ".join(p for p in parts if p)
+
+
+def _write_report(target_key, target, cursor_label, total_rows,
+                  sent, filtered, skipped, errors, warnings):
+    """Write a per-run Markdown audit report to output/reports/."""
+    reports_dir = os.path.join("output", "reports")
+    os.makedirs(reports_dir, exist_ok=True)
+
+    now = datetime.now(timezone.utc)
+    filename = f"{target_key}_{now.strftime('%Y-%m-%d_%H%M%S')}.md"
+    filepath = os.path.join(reports_dir, filename)
+
+    lines = []
+    lines.append(f"# Sync Report: {target_key}")
+    lines.append(f"**Run at:** {now.strftime('%Y-%m-%d %H:%M:%S')} UTC")
+    lines.append(f"**Cursor:** {cursor_label}")
+    lines.append(f"**Transformer:** {target['transformer']}")
+    lines.append(f"**Fetched from Bubble:** {total_rows} rows")
+    lines.append("")
+
+    # Summary
+    lines.append("## Summary")
+    lines.append("| Status | Count |")
+    lines.append("|--------|-------|")
+    lines.append(f"| Sent | {len(sent)} |")
+    lines.append(f"| Filtered | {len(filtered)} |")
+    lines.append(f"| Skipped (already sent) | {len(skipped)} |")
+    lines.append(f"| Errors | {len(errors)} |")
+    lines.append(f"| **Total** | {len(sent) + len(filtered) + len(skipped) + len(errors)} |")
+    lines.append("")
+
+    # Filtered
+    lines.append(f"## Filtered ({len(filtered)})")
+    if filtered:
+        lines.append("| # | Balo ID | Name | Reason |")
+        lines.append("|---|---------|------|--------|")
+        for i, (balo_id, name, reason) in enumerate(filtered, 1):
+            lines.append(f"| {i} | {balo_id} | {name} | {reason} |")
+    else:
+        lines.append("(none)")
+    lines.append("")
+
+    # Sent
+    lines.append(f"## Sent ({len(sent)})")
+    if sent:
+        lines.append("| # | Balo ID | Name | Job ID | HTTP |")
+        lines.append("|---|---------|------|--------|------|")
+        for i, (balo_id, name, job_id, http_status) in enumerate(sent, 1):
+            lines.append(f"| {i} | {balo_id} | {name} | {job_id} | {http_status} |")
+    else:
+        lines.append("(none)")
+    lines.append("")
+
+    # Skipped
+    lines.append(f"## Skipped - already sent ({len(skipped)})")
+    if skipped:
+        lines.append("| # | Balo ID | Name |")
+        lines.append("|---|---------|------|")
+        for i, (balo_id, name) in enumerate(skipped, 1):
+            lines.append(f"| {i} | {balo_id} | {name} |")
+    else:
+        lines.append("(none)")
+    lines.append("")
+
+    # Errors
+    lines.append(f"## Errors ({len(errors)})")
+    if errors:
+        lines.append("| # | Balo ID | Name | HTTP | Response |")
+        lines.append("|---|---------|------|------|----------|")
+        for i, (balo_id, name, http_status, response) in enumerate(errors, 1):
+            lines.append(f"| {i} | {balo_id} | {name} | {http_status} | {response} |")
+    else:
+        lines.append("(none)")
+    lines.append("")
+
+    # Warnings
+    if warnings:
+        lines.append(f"## Warnings ({len(warnings)})")
+        for w in warnings:
+            lines.append(f"- {w}")
+        lines.append("")
+
+    with open(filepath, "w") as f:
+        f.write("\n".join(lines))
+
+    return filepath
+
+
 def run_target(target_key: str, args) -> int:
     target = TARGETS[target_key]
     _log("=" * 64)
@@ -240,11 +414,12 @@ def run_target(target_key: str, args) -> int:
     with open_log() as log:
         cursor = _resolve_cursor(log, target["route_template"], args)
         if cursor:
-            _log(f"Cursor: modified_since = {cursor}")
+            cursor_label = f"modified_since = {cursor}"
         elif args.full:
-            _log("Cursor: --full (ignoring stored cursor)")
+            cursor_label = "--full (ignoring stored cursor)"
         else:
-            _log("Cursor: none (first run for this target)")
+            cursor_label = "none (first run for this target)"
+        _log(f"Cursor: {cursor_label}")
 
         run_id = log.start_run(
             route=target["route_template"],
@@ -270,45 +445,76 @@ def run_target(target_key: str, args) -> int:
         transformer_fn = getattr(transformer_mod, target["transformer"])
         columns, rows, provenance = transformer_fn(store)
 
-        candidate = [
+        # Separate real rows from separator rows
+        all_rows = [
             (row, sources)
             for row, sources in zip(rows, provenance)
-            if not row.get("_is_separator") and target["row_filter"](row)
+            if not row.get("_is_separator")
         ]
-        _log(f"  {len(candidate)} candidate rows (after filter)")
+        total_rows = len(all_rows)
+        _log(f"  {total_rows} data rows from transformer")
+
+        # Audit trail collectors
+        report_sent = []      # (balo_id, name, job_id, http_status)
+        report_filtered = []  # (balo_id, name, reason)
+        report_skipped = []   # (balo_id, name)
+        report_errors = []    # (balo_id, name, http_status, response)
 
         _log("Phase 3: Send")
         sender = Sender(log, dry_run=args.dry_run, verbose=args.verbose)
         send = getattr(sender, target["sender_method"])
+        row_checks = target.get("row_checks", [])
+        name_key = target.get("name_key", (target["url_key"],))
 
         attempted_ok = 0
-        for row, sources in candidate:
-            balo_id = row.get(target["url_key"])
+        for row, sources in all_rows:
+            balo_id = row.get(target["url_key"]) or ""
+            name = _build_name(row, name_key)
+
+            # Check filters
+            passed, reason = _check_row(row, row_checks)
+            if not passed:
+                report_filtered.append((balo_id, name, reason))
+                continue
+
             if not balo_id:
-                store.warnings.append(
-                    f"Skipping row with missing {target['url_key']}: {row}"
-                )
+                report_filtered.append((balo_id, name, f"missing {target['url_key']}"))
+                continue
+
+            # Check already sent — sender stores the full route URL in sync.db
+            # (e.g. "/crm/account/12345"), so build the same URL for the check.
+            route_url = target["route_template"].replace(":id", balo_id)
+            if log.already_sent(balo_id, route_url):
+                report_skipped.append((balo_id, name))
                 continue
 
             payload = _build_payload(
                 row,
                 target["payload_keys"],
                 omit_if_empty=target.get("omit_if_empty", ()),
-                omit_empty_strings=target.get("omit_empty_strings", False),
+                nullify_empty_strings=target.get("nullify_empty_strings", False),
+                key_map=target.get("key_map"),
+                defaults=target.get("defaults"),
             )
 
-            before_sent = sender.sent_count
             try:
-                send(balo_id, payload, sources)
-            except SenderError as exc:
-                _log(f"  [ABORT] {exc}")
-                _log("Run left incomplete — cursor will NOT advance. Fix and rerun.")
-                return 2
-
-            # sent_count only increments on a genuine (or dry-run) send, not on
-            # already_sent skips. That's what --limit should gate against.
-            if sender.sent_count > before_sent:
+                result = send(balo_id, payload, sources)
+                # result is dict {"accepted": true, "jobId": "..."} on 202,
+                # None on dry-run. SenderError raised on non-202.
+                job_id = ""
+                if result and isinstance(result, dict):
+                    job_id = result.get("jobId", result.get("job_id", ""))
+                report_sent.append((balo_id, name, job_id, 202))
                 attempted_ok += 1
+            except SenderError as exc:
+                report_errors.append((balo_id, name, exc.status_code or 0, str(exc)[:200]))
+                _log(f"  [ERROR] {exc}")
+                # Non-202 is not fatal for the run — continue with remaining rows.
+                # Only network failures (status_code=None) should abort.
+                if exc.status_code is None:
+                    _log("Network error — aborting run. Cursor will NOT advance.")
+                    break
+
             if args.limit and attempted_ok >= args.limit:
                 _log(f"  --limit {args.limit} reached, stopping.")
                 break
@@ -319,8 +525,17 @@ def run_target(target_key: str, args) -> int:
             records_skipped=sender.skipped_count,
         )
 
+        # Write audit report
+        report_path = _write_report(
+            target_key, target, cursor_label, total_rows,
+            report_sent, report_filtered, report_skipped,
+            report_errors, store.warnings,
+        )
+
         _log("-" * 64)
-        _log(f"Sent: {sender.sent_count}  Skipped (already sent): {sender.skipped_count}")
+        _log(f"Sent: {len(report_sent)}  Filtered: {len(report_filtered)}  "
+             f"Skipped: {len(report_skipped)}  Errors: {len(report_errors)}")
+        _log(f"Report: {report_path}")
         if store.warnings:
             _log(f"Warnings: {len(store.warnings)} (first 5 below)")
             for w in store.warnings[:5]:

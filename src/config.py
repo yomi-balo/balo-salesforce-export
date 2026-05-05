@@ -70,6 +70,10 @@ RECORD_TYPE_PROJECT_OPPORTUNITY = "012On00000L9nILIAZ"  # FLAG FOR NICK: confirm
 PROSPECT_STATUS = "Signed Up"
 ACCOUNT_SOURCE = "Balo Sourced"
 
+# --- Role-based classification ---
+# Roles that mark a user as an expert or Balo internal admin.
+EXPERT_OR_ADMIN_ROLES = {"agency-expert", "freelance-expert", "agency-admin", "admin"}
+
 # --- Sensitive fields to redact ---
 SENSITIVE_FIELDS = [
     "Cronofy Access token",
@@ -97,6 +101,12 @@ def join_array_slugs(arr):
     if not arr:
         return ""
     return ";".join(get_slug(v) for v in arr if get_slug(v))
+
+def list_array_slugs(arr):
+    """Return slugs as a Python list (for API payloads that expect JSON arrays)."""
+    if not arr:
+        return []
+    return [get_slug(v) for v in arr if get_slug(v)]
 
 def join_array_display(arr):
     if not arr:
