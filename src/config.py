@@ -53,6 +53,7 @@ TABLE_PATHS = {
     "country":              _encode("📍country"),
     "package":              _encode("📄package"),
     "projectmeeting":       _encode("🆕📞projectmeeting"),
+    "deliverable":          _encode("📦deliverable"),
 }
 
 # --- Rate limiting ---

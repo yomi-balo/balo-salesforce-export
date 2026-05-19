@@ -28,6 +28,7 @@ class DataStore:
         self.consultations = {}
         self.projectmeetings = {}
         self.packages = {}
+        self.deliverables = []
 
         # Warnings accumulated during fetch
         self.warnings = []
@@ -118,6 +119,7 @@ class Fetcher:
         self._load_list("cases",           "case",                  constraints)
         self._load_list("project_requests", "project_request",      constraints)
         self._load_list("project_eois",    "project_eoi",           constraints)
+        self._load_list("deliverables",    "deliverable",           constraints)
         self._load_list("meetings",        "meeting",               constraints)
 
         # Dict tables (random-access from FKs).
@@ -223,6 +225,7 @@ class Fetcher:
                 "cases":            {c["_id"] for c in self.store.cases},
                 "project_requests": {r["_id"] for r in self.store.project_requests},
                 "project_eois":     {e["_id"] for e in self.store.project_eois},
+                "deliverables":     {d["_id"] for d in self.store.deliverables},
                 "meetings":         {m["_id"] for m in self.store.meetings},
                 "users":            set(self.store.users.keys()),
                 "experts":          set(self.store.experts.keys()),

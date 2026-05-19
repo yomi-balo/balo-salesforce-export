@@ -423,8 +423,8 @@ def transform_opportunities_cases(store):
     columns = [
         "_group", "Balo_Id__c", "Name", "CloseDate", "StageName", "RecordTypeId",
         "Balo_Case_Number__c", "Description", "Total_Consultation_Minutes__c",
-        "Total_Credits_Used__c", "Amount", "Balo_Created_Date__c",
-        "Product__c", "Type_Of_Support__c",
+        "Total_Credits_Used__c", "Amount", "Expert_Earnings__c", "Balo_Created_Date__c",
+        "Product__c", "Type_of_Support__c",
         "Account.Balo_Id__c", "Primary_Contact__r.Balo_Id__c", "Expert__r.Balo_Id__c",
     ]
     rows = []
@@ -456,21 +456,26 @@ def transform_opportunities_cases(store):
         expert_profile_uid = expert_profiles[0] if expert_profiles else ""
         expert_user_uid = _expert_user_id(expert_profile_uid, store) if expert_profile_uid else ""
 
+        # StageName: SF picklist expects Title-case ("Ongoing"), Bubble stores slugs ("ongoing").
+        status_val = case.get("Status")
+        stage_name = get_display(status_val) if isinstance(status_val, dict) else (str(status_val).capitalize() if status_val else "")
+
         rows.append({
             "_group": company_name,
             "Balo_Id__c": case["_id"],
             "Name": _safe_get(case, "Title"),
             "CloseDate": "",  # intentionally blank
-            "StageName": get_slug(case.get("Status")),
+            "StageName": stage_name,
             "RecordTypeId": RECORD_TYPE_CASE_OPPORTUNITY,
             "Balo_Case_Number__c": _safe_get(case, "Case ID"),
             "Description": _safe_get(case, "Description"),
             "Total_Consultation_Minutes__c": _safe_get(case, "Total consultation minutes"),
             "Total_Credits_Used__c": _safe_get(case, "Total credits used"),
-            "Amount": _safe_get(case, "Total amount earned"),
+            "Amount": _safe_get(case, "Total credits used"),
+            "Expert_Earnings__c": _safe_get(case, "Total amount earned"),
             "Balo_Created_Date__c": _safe_get(case, "Created Date"),
             "Product__c": join_array_slugs(case.get("Products", [])),
-            "Type_Of_Support__c": type_of_support,
+            "Type_of_Support__c": type_of_support,
             "Account.Balo_Id__c": cc_uid,
             "Primary_Contact__r.Balo_Id__c": _safe_get(case, "Client user"),
             "Expert__r.Balo_Id__c": expert_user_uid,
@@ -500,6 +505,7 @@ def transform_opportunities_projects(store):
     provenance = []
 
     company_map = {c["_id"]: c for c in store.clientcompanies}
+    case_map = {c["_id"]: c for c in store.cases}
 
     for req in store.project_requests:
         cc_uid = _safe_get(req, "Client Company")
@@ -566,7 +572,9 @@ def transform_opportunities_projects(store):
             "Expert_Earnings__c": expert_earnings,
             "Account.Balo_Id__c": cc_uid,
             "Primary_Contact__r.Balo_Id__c": _safe_get(req, "Client User"),
-            "Related_Case__r.Balo_Id__c": _safe_get(req, "Selected Case"),
+            "Related_Case__r.Balo_Case_Number__c": _safe_get(
+                case_map.get(_safe_get(req, "Selected Case"), {}), "Case ID"
+            ),
         })
         provenance.append(_sources(
             _src("project_request", req["_id"], "request"),
@@ -580,7 +588,11 @@ def transform_opportunities_projects(store):
 def transform_project_experts(store):
     """Sheet 5: Expert-Project links (Project__c)."""
     columns = [
-        "_group", "Balo_Id__c", "Expert_EOI_Status__c",
+        "_group", "Balo_Id__c",
+        "EOI_Status__c", "EOI_Submitted_Date__c", "Proposal_Submitted_Date__c",
+        "Finalized_Date__c", "Proposal_Status__c", "Estimated_Completion_Date__c",
+        "Experts_Proposed_Cost__c", "Pricing_Method__c", "Hourly_Rate__c",
+        "Payment_Terms__c", "Customer_Cost__c", "Total_Hours__c",
         "Opportunity__r.Balo_Id__c", "Expert__r.Balo_Id__c",
     ]
     rows = []
@@ -588,6 +600,17 @@ def transform_project_experts(store):
 
     req_map = {r["_id"]: r for r in store.project_requests}
     company_map = {c["_id"]: c for c in store.clientcompanies}
+
+    # Pre-compute total hours per project from deliverables
+    project_hours = {}
+    for d in store.deliverables:
+        proj_uid = _safe_get(d, "Project")
+        hours = _safe_get(d, "Hours", 0)
+        if proj_uid and hours:
+            try:
+                project_hours[proj_uid] = project_hours.get(proj_uid, 0) + float(hours)
+            except (ValueError, TypeError):
+                pass
 
     for eoi in store.project_eois:
         req_uid = _safe_get(eoi, "Request")
@@ -599,16 +622,37 @@ def transform_project_experts(store):
         expert_uid = _safe_get(eoi, "Expert")
         expert_user_uid = _expert_user_id(expert_uid, store)
 
+        # EOI.Proposal links directly to the Project (if one exists)
+        proj_uid = _safe_get(eoi, "Proposal")
+        proj = store.projects.get(proj_uid, {}) if proj_uid else {}
+
+        # Total hours from deliverables (if available)
+        total_hours = project_hours.get(proj_uid, "") if proj_uid else ""
+
         rows.append({
             "_group": company_name,
             "Balo_Id__c": f"{req_uid}-{expert_user_uid}" if req_uid and expert_user_uid else "",
-            "Expert_EOI_Status__c": get_slug(eoi.get("Status")),
+            # EOI fields
+            "EOI_Status__c": get_slug(eoi.get("Status")),
+            "EOI_Submitted_Date__c": _safe_get(eoi, "Created Date"),
+            "Proposal_Submitted_Date__c": _safe_get(eoi, "Pitch Submitted at"),
+            # Project fields (empty if no finalized project)
+            "Finalized_Date__c": _safe_get(proj, "Created Date"),
+            "Proposal_Status__c": get_slug(proj.get("Status")),
+            "Estimated_Completion_Date__c": _safe_get(proj, "Estimated Completion Date"),
+            "Experts_Proposed_Cost__c": _safe_get(proj, "Total Cost (Excluding Fees)"),
+            "Pricing_Method__c": _safe_get(proj, "Pricing Model"),
+            "Hourly_Rate__c": _safe_get(proj, "Hourly Rate (Excluding fees)"),
+            "Payment_Terms__c": _safe_get(proj, "Payment Structure"),
+            "Customer_Cost__c": _safe_get(proj, "Total Cost (Including Fees)"),
+            "Total_Hours__c": total_hours,
             "Opportunity__r.Balo_Id__c": req_uid,
             "Expert__r.Balo_Id__c": expert_user_uid,
         })
         provenance.append(_sources(
             _src("project_eoi", eoi["_id"], "primary"),
             _src("project_request", req_uid, "request"),
+            _src("project", proj_uid, "finalized project") if proj_uid else None,
             _src("profile_expert", expert_uid, "expert profile"),
             _src("profile_clientcompany", cc_uid, "client company"),
         ))
@@ -753,7 +797,7 @@ def _build_meeting_row(meeting, store, company_map):
         "Expert_Join_Time__c": _safe_get(meeting, "Organiser Join time"),
         "Ended_By_Expert__c": _safe_get(meeting, "Ended by Organizer"),
         "Ended_By_Client__c": _safe_get(meeting, "Ended by Invitor"),
-        "Participants_Present__c": "",  # always empty per spec
+        "Participants_Present__c": meeting.get("Summary Present [Temp]"),
         "Balo_Created_Date__c": _safe_get(meeting, "Created Date"),
     }
     sources = _sources(
