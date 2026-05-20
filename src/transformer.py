@@ -751,7 +751,14 @@ def _build_meeting_row(meeting, store, company_map):
     else:
         pm_uid = _safe_get(meeting, "🆕 Project Meeting")
         pm = store.projectmeetings.get(pm_uid, {})
-        pr_uid = _safe_get(pm, "Project Request", _safe_get(pm, "Project"))
+        # Project__c records are keyed by {project_request_uid}-{expert_user_uid}.
+        # Some projectmeetings only have a Project link, not a Project Request — resolve
+        # through the project record in that case.
+        pr_uid = _safe_get(pm, "Project Request")
+        if not pr_uid:
+            proj_uid = _safe_get(pm, "Project")
+            if proj_uid:
+                pr_uid = _safe_get(store.projects.get(proj_uid, {}), "Project Request")
         pm_expert_uid = _safe_get(pm, "Expert")
         pm_expert_user = _expert_user_id(pm_expert_uid, store) if pm_expert_uid else ""
         if pr_uid and pm_expert_user:
