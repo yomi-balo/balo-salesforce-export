@@ -797,7 +797,9 @@ def _build_meeting_row(meeting, store, company_map):
         "Expert_Join_Time__c": _safe_get(meeting, "Organiser Join time"),
         "Ended_By_Expert__c": _safe_get(meeting, "Ended by Organizer"),
         "Ended_By_Client__c": _safe_get(meeting, "Ended by Invitor"),
-        "Participants_Present__c": meeting.get("Summary Present [Temp]"),
+        # SF requires True/False (not null). Bubble only computes "Summary Present [Temp]"
+        # for completed meetings — missed/cancelled meetings have no value, default to False.
+        "Participants_Present__c": bool(meeting.get("Summary Present [Temp]")),
         "Balo_Created_Date__c": _safe_get(meeting, "Created Date"),
     }
     sources = _sources(
