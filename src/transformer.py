@@ -664,7 +664,8 @@ def transform_consultations(store):
     """Sheet 6: Consultations — primary table is meeting."""
     columns = [
         "_group", "_meeting_type", "Balo_Id__c",
-        "Opportunity__r.Balo_Id__c", "Project__r.Balo_Id__c",
+        "Opportunity__r.Balo_Id__c", "Opportunity__r.Balo_Case_Number__c",
+        "Project__r.Balo_Id__c",
         "Expert__r.Balo_Id__c", "Scheduled_DateTime__c",
         "Start_Time__c", "End_Time__c", "Actual_End_Time__c",
         "Duration_Minutes__c", "Actual_Duration_Minutes__c",
@@ -738,7 +739,11 @@ def _build_meeting_row(meeting, store, company_map):
     if is_consultation:
         consult_uid = _safe_get(meeting, "🆕 Consultation")
         consult = store.consultations.get(consult_uid, {})
-        opp_id = _safe_get(consult, "Case")
+        # Case Opportunities are keyed by Balo_Case_Number__c (e.g., "LEA-60666"),
+        # not Balo_Id__c. Resolve the case Bubble UID to its Case ID for the FK.
+        case_uid = _safe_get(consult, "Case")
+        case_record = next((c for c in store.cases if c.get("_id") == case_uid), {})
+        opp_id = _safe_get(case_record, "Case ID")
         expert_rate = _safe_get(consult, "Expert Rate")
         estimated_cost = _safe_get(consult, "Cost estimated")
         final_cost = _safe_get(consult, "Cost Incurred Final")
@@ -771,11 +776,14 @@ def _build_meeting_row(meeting, store, company_map):
     billing_val = meeting.get("🆕 Billing Mode")
     billing = get_display(billing_val) if isinstance(billing_val, dict) else (str(billing_val).capitalize() if billing_val else "")
 
+    # Case opportunities use Balo_Case_Number__c as external ID; projects use Balo_Id__c.
+    opp_key = "Opportunity__r.Balo_Case_Number__c" if is_consultation else "Opportunity__r.Balo_Id__c"
+
     row = {
         "_group": company_name,
         "_meeting_type": type_slug,
         "Balo_Id__c": meeting["_id"],
-        "Opportunity__r.Balo_Id__c": opp_id,
+        opp_key: opp_id,
         "Project__r.Balo_Id__c": proj_id,
         "Expert__r.Balo_Id__c": expert_user_uid,
         "Scheduled_DateTime__c": _safe_get(meeting, "Created Date"),

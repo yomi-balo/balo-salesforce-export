@@ -229,7 +229,8 @@ TARGETS = {
         "url_key": "Balo_Id__c",
         "name_key": ("Balo_Id__c",),
         "payload_keys": [
-            "Opportunity__r.Balo_Id__c", "Project__r.Balo_Id__c",
+            "Opportunity__r.Balo_Id__c", "Opportunity__r.Balo_Case_Number__c",
+            "Project__r.Balo_Id__c",
             "Expert__r.Balo_Id__c", "Scheduled_DateTime__c", "Start_Time__c",
             "End_Time__c", "Actual_End_Time__c", "Duration_Minutes__c",
             "Actual_Duration_Minutes__c", "Status__c", "Billing_Mode__c",
@@ -240,7 +241,8 @@ TARGETS = {
             "Participants_Present__c", "Balo_Created_Date__c",
         ],
         "omit_if_empty": (
-            "Opportunity__r.Balo_Id__c", "Project__r.Balo_Id__c",
+            "Opportunity__r.Balo_Id__c", "Opportunity__r.Balo_Case_Number__c",
+            "Project__r.Balo_Id__c",
             "Expert_Rate__c", "Estimated_Cost__c", "Final_Cost__c",
             "GST_Amount__c", "Actual_End_Time__c", "Actual_Duration_Minutes__c",
             "Client_Join_Time__c", "Expert_Join_Time__c",
