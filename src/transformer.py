@@ -252,7 +252,7 @@ def transform_prospects_contacts(store):
         "Consultation_Min_Rate__c", "Average_Rating__c", "Total_Reviews__c",
         "LinkedIn_URL__c", "Trailblazer_URL__c", "Headline__c",
         "Application_Status__c", "Expert_Unique_ID__c", "Cronofy_User_ID__c",
-        "MailingCountry", "Account.Balo_Id__c", "Balo_Role__c",
+        "MailingCountry", "Account.Balo_Id__c", "Balo_Role__c", "Description",
     ]
     rows = []
     provenance = []
@@ -409,7 +409,8 @@ def _build_expert_prospect_row(user, email, expert, account_name, account_id, ac
         "Cronofy_User_ID__c": _safe_get(expert, "⚙️ Cronofy User ID"),
         "MailingCountry": _resolve_country(_safe_get(expert, "Country"), store, "Alpha-2 code"),
         "Account.Balo_Id__c": account_id if account_id else "",
-        "Balo_Role__c": "",
+        "Balo_Role__c": get_slug(user.get("Role: Active")),
+        "Description": _safe_get(expert, "Profile Description"),
     }
     sources = _sources(
         _src("user", _safe_get(user, "_id"), "primary"),
