@@ -147,7 +147,7 @@ TARGETS = {
             "Application_Status__c", "Expert_Unique_ID__c", "Cronofy_User_ID__c",
             "MailingCountry", "Account.Balo_Id__c",
         ],
-        "key_map": {"firstName": "FirstName", "lastName": "LastName", "email": "Email"},
+        "key_map": {"firstName": "FirstName", "lastName": "LastName", "email": "Email", "baloRoles": "Balo_Roles__c"},
         "omit_if_empty": ("Account.Balo_Id__c",),
         "sender_method": "send_contact",
         "label": "Expert Contacts → PATCH /crm/contact/:id",
