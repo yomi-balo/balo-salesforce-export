@@ -155,7 +155,9 @@ def transform_accounts(store):
             "Name": _safe_get(company, "Name"),
             "Phone": _safe_get(admin_user, "Phone"),
             "Website": "",
-            "Type": "Company",
+            # Type is set by the /crm/prospect Apex flow when the prospect was created.
+            # Omit here so we don't overwrite that value on subsequent account upserts.
+            "Type": "",
             "AccountSource": ACCOUNT_SOURCE,
             "Stripe_Customer_Id__c": _safe_get(company, "🤑 Stripe: Customer ID"),
             "Has_Booked_Consultation__c": _safe_get(company, "☑️ Consultation: Booked at least one"),

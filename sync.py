@@ -116,6 +116,9 @@ TARGETS = {
             "Balo_Created_Date__c", "Stripe_Seller_ID__c",
             "Stripe_Connection_Status__c",
         ],
+        # Type is intentionally empty for CLIENT rows so the /crm/prospect Apex
+        # flow's value is preserved. AGENCY/FREELANCE rows send Type as normal.
+        "omit_if_empty": ("Type",),
         "sender_method": "send_account",
         "label": "Accounts (clients + agencies) → PATCH /crm/account/:id",
     },
