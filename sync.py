@@ -137,7 +137,7 @@ TARGETS = {
         "name_key": ("firstName", "lastName", "email"),
         "payload_keys": [
             "firstName", "lastName", "email",
-            "RecordTypeId", "Balo_Role__c", "baloRoles",
+            "RecordTypeId", "Balo_Role__c", "Balo_Roles__c",
             "Expert_Type__c",
             "Is_CTA__c", "Is_MVP__c", "Salesforce_Start_Year__c",
             "Years_Experience__c", "Project_Count_Range__c",
@@ -147,7 +147,7 @@ TARGETS = {
             "Application_Status__c", "Expert_Unique_ID__c", "Cronofy_User_ID__c",
             "MailingCountry", "Account.Balo_Id__c",
         ],
-        "key_map": {"firstName": "FirstName", "lastName": "LastName", "email": "Email", "baloRoles": "Balo_Roles__c"},
+        "key_map": {"firstName": "FirstName", "lastName": "LastName", "email": "Email"},
         "omit_if_empty": ("Account.Balo_Id__c",),
         "sender_method": "send_contact",
         "label": "Expert Contacts → PATCH /crm/contact/:id",

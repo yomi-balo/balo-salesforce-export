@@ -252,7 +252,7 @@ def transform_prospects_contacts(store):
         "Consultation_Min_Rate__c", "Average_Rating__c", "Total_Reviews__c",
         "LinkedIn_URL__c", "Trailblazer_URL__c", "Headline__c",
         "Application_Status__c", "Expert_Unique_ID__c", "Cronofy_User_ID__c",
-        "MailingCountry", "Account.Balo_Id__c", "Balo_Role__c", "Description",
+        "MailingCountry", "Account.Balo_Id__c", "Balo_Role__c", "Balo_Roles__c", "Description",
     ]
     rows = []
     provenance = []
@@ -410,6 +410,9 @@ def _build_expert_prospect_row(user, email, expert, account_name, account_id, ac
         "MailingCountry": _resolve_country(_safe_get(expert, "Country"), store, "Alpha-2 code"),
         "Account.Balo_Id__c": account_id if account_id else "",
         "Balo_Role__c": get_slug(user.get("Role: Active")),
+        # SF multipicklist expects semicolon-separated string (the bare `baloRoles` array
+        # form is for the /crm/prospect Apex endpoint).
+        "Balo_Roles__c": join_array_slugs(user.get("Roles", [])),
         "Description": _safe_get(expert, "Profile Description"),
     }
     sources = _sources(
