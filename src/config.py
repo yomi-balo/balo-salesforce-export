@@ -75,6 +75,11 @@ ACCOUNT_SOURCE = "Balo Sourced"
 # Roles that mark a user as an expert or Balo internal admin.
 EXPERT_OR_ADMIN_ROLES = {"agency-expert", "freelance-expert", "agency-admin", "admin"}
 
+# Roles that mark a user as a client (regardless of whether they also have expert roles).
+# Many real clients are also experts — they have both freelance-expert AND client-admin/staff.
+# Filters that key off "has no expert role" wrongly exclude these dual-role users.
+CLIENT_ROLES = {"client-admin", "client-staff", "client-guest"}
+
 # --- Sensitive fields to redact ---
 SENSITIVE_FIELDS = [
     "Cronofy Access token",

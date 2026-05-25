@@ -63,7 +63,7 @@ from src.sync_log import SyncLog, open_log
 #   sender_method   — method name on Sender to call.
 #   label           — human-readable tag for logs.
 
-from src.config import EXPERT_OR_ADMIN_ROLES
+from src.config import EXPERT_OR_ADMIN_ROLES, CLIENT_ROLES
 
 # Test/internal emails — same list as the middleware (processor.ts BLOCKED_EMAIL_PATTERNS).
 BLOCKED_EMAIL_PATTERNS = ("@revido.io", "ylinkz", "yomi@getbalo.com")
@@ -80,7 +80,7 @@ TARGETS = {
         "transformer": "transform_prospects_contacts",
         "row_checks": [
             ("not a CLIENT row", lambda r: r.get("_contact_type") == "CLIENT"),
-            ("has expert/admin role", lambda r: not EXPERT_OR_ADMIN_ROLES.intersection(r.get("baloRoles", []))),
+            ("not a real client (no client role)", lambda r: bool(CLIENT_ROLES.intersection(r.get("baloRoles", [])))),
             ("blocked test email", lambda r: not _is_blocked_email(r)),
         ],
         "url_key": "baloId",

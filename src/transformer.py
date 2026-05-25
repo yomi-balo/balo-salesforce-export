@@ -14,6 +14,7 @@ from src.config import (
     RECORD_TYPE_PROJECT_OPPORTUNITY,
     SENSITIVE_FIELDS,
     EXPERT_OR_ADMIN_ROLES,
+    CLIENT_ROLES,
 )
 
 
@@ -69,13 +70,21 @@ def _redact(record):
 
 
 def _smart_field(record, mode_slug, prefix):
-    """Select the correct field version based on Mode (AI/Manual/Final)."""
+    """Select the correct field version based on Mode (AI/Manual/Final).
+
+    Falls back to "(Final)" when the mode-specific field is empty — Bubble sometimes
+    only populates "Title (Final)" / "Description (Final)" even for manual/ai mode
+    requests, and we'd otherwise filter those out as if they had no title.
+    """
     if not mode_slug:
         return ""
     label = mode_slug if mode_slug in ("AI", "Manual", "Final") else mode_slug.capitalize()
     if label not in ("AI", "Manual", "Final"):
-        label = "Final"  # fallback
-    return _safe_get(record, f"{prefix} ({label})")
+        label = "Final"
+    val = _safe_get(record, f"{prefix} ({label})")
+    if not val and label != "Final":
+        val = _safe_get(record, f"{prefix} (Final)")
+    return val
 
 
 def _separator_row(label):
@@ -165,10 +174,12 @@ def transform_accounts(store):
         admin_uid = _safe_get(company, "Admin")
         admin_user = store.users.get(admin_uid, {}) if admin_uid else {}
 
-        # A company is "real" if at least one user has pure client roles (no expert roles).
+        # A company is "real" if at least one user has any client role. Dual-role users
+        # (e.g. freelance-expert + client-admin) count — they're real customers who are
+        # also experts on the platform.
         company_users = [u for u in store.users.values() if u.get("Company") == company["_id"]]
         has_real_client = any(
-            not EXPERT_OR_ADMIN_ROLES.intersection(list_array_slugs(u.get("Roles", [])))
+            CLIENT_ROLES.intersection(list_array_slugs(u.get("Roles", [])))
             for u in company_users
         ) if company_users else False
 
