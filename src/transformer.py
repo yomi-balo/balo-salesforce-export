@@ -1,3 +1,6 @@
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 from src.config import (
     get_slug,
     get_display,
@@ -14,6 +17,12 @@ from src.config import (
 )
 
 
+# Balo is an Australian product. Bubble returns timestamps in UTC, but SF Date-only
+# fields truncate based on UTC — so a Bubble timestamp at 2026-05-05T15:08Z (which is
+# May 6 1:08 AM in Sydney) ends up displayed as May 5 in SF. Convert to local TZ first.
+_SYDNEY_TZ = ZoneInfo("Australia/Sydney")
+
+
 # --- Helpers ---
 
 def _safe_get(record, key, default=""):
@@ -21,6 +30,23 @@ def _safe_get(record, key, default=""):
         return default
     val = record.get(key)
     return val if val is not None else default
+
+
+def _to_local_date(value):
+    """Convert a UTC ISO datetime string to a Sydney-local YYYY-MM-DD date string.
+
+    Returns "" for empty/None input. Returns the original value unchanged if it
+    can't be parsed as ISO (so non-datetime strings pass through safely).
+    """
+    if not value:
+        return ""
+    if not isinstance(value, str):
+        return value
+    try:
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return value
+    return dt.astimezone(_SYDNEY_TZ).date().isoformat()
 
 
 def _resolve_country(uid, store, field="Name"):
@@ -528,7 +554,7 @@ def transform_opportunities_projects(store):
             name = _safe_get(proj, "Project title")
             stage_name = "Project"
             sub_status = get_slug(proj.get("Status"))
-            close_date = _safe_get(proj, "Estimated Completion Date")
+            close_date = _to_local_date(_safe_get(proj, "Estimated Completion Date"))
             description = _safe_get(proj, "Project description (RT)")
             created_date = _safe_get(proj, "Created Date")
             project_id = _safe_get(proj, "_id")
@@ -569,7 +595,7 @@ def transform_opportunities_projects(store):
             "Package__c": _safe_get(req, "Package"),
             "Active_Proposal_Count__c": _safe_get(req, "Active Proposal Count"),
             "Discovery_Insights__c": _safe_get(req, "Discovery Call Insights"),
-            "Submitted_Date__c": _safe_get(req, "Submitted Date"),
+            "Submitted_Date__c": _to_local_date(_safe_get(req, "Submitted Date")),
             "Balo_Created_Date__c": created_date,
             "Product__c": join_array_slugs(product_arr) if isinstance(product_arr, list) else str(product_arr or ""),
             "Project_ID__c": project_id,
@@ -635,17 +661,24 @@ def transform_project_experts(store):
         # Total hours from deliverables (if available)
         total_hours = project_hours.get(proj_uid, "") if proj_uid else ""
 
+        # Finalized date = when the client accepted the proposal. Bubble has no explicit
+        # "Accepted Date" field, so we use the EOI's Modified Date (only meaningful when
+        # the EOI has been finalized — i.e., the last change was the status flip to
+        # 'finalized'). Falls back to empty for non-finalized EOIs.
+        eoi_status_slug = get_slug(eoi.get("Status"))
+        finalized_date = _safe_get(eoi, "Modified Date") if eoi_status_slug == "finalized" else ""
+
         rows.append({
             "_group": company_name,
             "Balo_Id__c": f"{req_uid}-{expert_user_uid}" if req_uid and expert_user_uid else "",
             # EOI fields
-            "EOI_Status__c": get_slug(eoi.get("Status")),
-            "EOI_Submitted_Date__c": _safe_get(eoi, "Created Date"),
-            "Proposal_Submitted_Date__c": _safe_get(eoi, "Pitch Submitted at"),
+            "EOI_Status__c": eoi_status_slug,
+            "EOI_Submitted_Date__c": _to_local_date(_safe_get(eoi, "Created Date")),
+            "Proposal_Submitted_Date__c": _to_local_date(_safe_get(eoi, "Pitch Submitted at")),
             # Project fields (empty if no finalized project)
-            "Finalized_Date__c": _safe_get(proj, "Created Date"),
+            "Finalized_Date__c": _to_local_date(finalized_date),
             "Proposal_Status__c": get_slug(proj.get("Status")),
-            "Estimated_Completion_Date__c": _safe_get(proj, "Estimated Completion Date"),
+            "Estimated_Completion_Date__c": _to_local_date(_safe_get(proj, "Estimated Completion Date")),
             "Experts_Proposed_Cost__c": _safe_get(proj, "Total Cost (Excluding Fees)"),
             "Pricing_Method__c": _safe_get(proj, "Pricing Model"),
             "Hourly_Rate__c": _safe_get(proj, "Hourly Rate (Excluding fees)"),
