@@ -33,6 +33,38 @@ def _safe_get(record, key, default=""):
     return val if val is not None else default
 
 
+def _pricing_method_label(proj):
+    """Map Bubble's Pricing Model slug to the SF picklist value."""
+    slug = get_slug(proj.get("Pricing Model"))
+    mapping = {"hourly": "Times & Materials", "fixed": "Fixed Price"}
+    if not slug:
+        return ""
+    return mapping.get(slug, slug.replace("-", " ").title())
+
+
+def _payment_terms_label(proj):
+    """Compose human-readable payment terms string from Payment Structure + Upfront Percentage."""
+    structure = get_slug(proj.get("Payment Structure"))
+    if not structure:
+        return ""
+    if structure == "full-on-project-completion":
+        return "100% upon completion"
+    if structure == "full-upfront":
+        return "100% upfront"
+    if structure == "custom-upfront":
+        pct = proj.get("Upfront Percentage") or 0
+        try:
+            upfront = int(round(float(pct) * 100))
+        except (TypeError, ValueError):
+            upfront = 0
+        if upfront <= 0:
+            return "100% upon completion"
+        if upfront >= 100:
+            return "100% upfront"
+        return f"{upfront}% upfront and {100 - upfront}% upon completion"
+    return structure.replace("-", " ").capitalize()
+
+
 def _to_local_date(value):
     """Convert a UTC ISO datetime string to a Sydney-local YYYY-MM-DD date string.
 
@@ -294,12 +326,18 @@ def transform_prospects_contacts(store):
     rows = []
     provenance = []
 
-    # Users that back a profile_expert record route via /crm/account + /crm/contact,
-    # NOT /crm/prospect — even if they also have a client Company link.
+    # Users that route via /crm/account + /crm/contact (the "expert" path) instead of
+    # /crm/prospect (the "client" path). A user is an expert only when they (a) have
+    # a profile_expert record AND (b) have an expert/admin role in their user.Roles.
+    # Some client users have a draft/started expert profile from exploring the platform
+    # but only have client roles — those should still be routed as prospects.
     expert_user_ids = {
         expert.get("User")
         for expert in store.experts.values()
         if expert.get("User")
+        and EXPERT_OR_ADMIN_ROLES.intersection(
+            list_array_slugs(store.users.get(expert.get("User"), {}).get("Roles", []))
+        )
     }
 
     # --- Client users grouped by company ---
@@ -691,9 +729,9 @@ def transform_project_experts(store):
             "Proposal_Status__c": get_slug(proj.get("Status")),
             "Estimated_Completion_Date__c": _to_local_date(_safe_get(proj, "Estimated Completion Date")),
             "Experts_Proposed_Cost__c": _safe_get(proj, "Total Cost (Excluding Fees)"),
-            "Pricing_Method__c": _safe_get(proj, "Pricing Model"),
+            "Pricing_Method__c": _pricing_method_label(proj),
             "Hourly_Rate__c": _safe_get(proj, "Hourly Rate (Excluding fees)"),
-            "Payment_Terms__c": _safe_get(proj, "Payment Structure"),
+            "Payment_Terms__c": _payment_terms_label(proj),
             "Customer_Cost__c": _safe_get(proj, "Total Cost (Including Fees)"),
             "Total_Hours__c": total_hours,
             "Opportunity__r.Balo_Id__c": req_uid,
