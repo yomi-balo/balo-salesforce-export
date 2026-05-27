@@ -10,6 +10,32 @@ fixes for parity.
 
 ---
 
+## Outstanding for Nick (Salesforce side)
+
+### `Prospect upsert failed: bad value for restricted picklist field: Bad Data`
+
+The `/crm/prospect` Apex endpoint started rejecting some new client-admin
+prospects (2026-05-26 onwards) with the above error. Example users affected:
+- Lewin Ellis (lewin@accessaccom.com.au, Bubble user
+  `1779770026822x368870255722896200`)
+- Daniel Witherington (daniel.witherington@thetransformationgroup.com.au)
+
+Payloads look identical in shape to earlier successful prospects (same roles,
+same `accountType: Prospect`). The literal `"Bad Data"` in the error message
+suggests either an actual picklist value of "Bad Data" being sent somewhere,
+or a generic error string in the Apex. Needs Nick to debug.
+
+### Silent SF failures with HTTP 202 ack from middleware
+
+Throughout the backfill we've found records where the middleware returned
+HTTP 202 (job queued) but the actual SF upsert silently failed without ever
+making it to sync.db's `sf_status`. Currently we only catch these when a
+downstream FK lookup fails. **Improve middleware/worker so the final SF
+status (success/failure) is propagated back to sync.db** so we can detect
+orphans proactively instead of via cascade.
+
+---
+
 ## 1. Real-time payload normalization
 
 ### 1.1 Cases — `PATCH /crm/opportunity/case/:id`
