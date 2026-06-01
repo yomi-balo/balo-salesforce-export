@@ -34,6 +34,27 @@ downstream FK lookup fails. **Improve middleware/worker so the final SF
 status (success/failure) is propagated back to sync.db** so we can detect
 orphans proactively instead of via cascade.
 
+### Account.Balo_Id__c not findable after successful upsert (2026-06-01)
+
+After a full project resync we observed ~17 accounts that show **green "SF sync
+succeeded"** in #sf-sync-activity, but a subsequent project upsert referencing
+the same `Account.Balo_Id__c` value gets `Foreign key external ID: X not found
+for field Balo_Id__c in entity Account`.
+
+Example: Account `1778806386672x253092788506382500` (Salesforce / sarah.hunter)
+- 2026-06-01 20:10:21 AEST — PATCH /crm/account/:id returned 2xx (green Slack)
+- 2026-06-01 20:14:50 AEST — Project upsert references same Balo_Id__c → 4xx
+  "not found for field Balo_Id__c in entity Account"
+
+Hypothesis: a Salesforce flow / trigger / dedup-match-policy on Account is
+either overwriting `Balo_Id__c` after our upsert, or causing the upsert to
+merge into an existing record without preserving the external ID. **Needs
+Nick to investigate** — likely related to his recent SF flow changes.
+
+Affected company UIDs (sample): 1739931484647x... (Salesforce - paige.ward),
+1778806386672x... (Salesforce - sarah.hunter), 1779260790400x... (Salesforce -
+paige.ward), several more.
+
 ---
 
 ## 1. Real-time payload normalization
