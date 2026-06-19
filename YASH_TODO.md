@@ -6,7 +6,7 @@ these transformations server-side, but real-time Bubble payloads bypass the
 transformer and hit the middleware directly — so Bubble flows need their own
 fixes for parity.
 
-> Maintained by Yomi/Claude as new issues come up. Last updated: 2026-05-27.
+> Maintained by Yomi/Claude as new issues come up. Last updated: 2026-06-19.
 
 ---
 
@@ -110,6 +110,14 @@ canonical values directly.
   should preserve that value.
 - AGENCY and FREELANCE-EXPERT synthetic accounts can still send `Type`
   (those aren't created by the prospect flow).
+- **Don't push CLIENT account upserts for expert-self-companies.** A company
+  qualifies as a real client only if at least one user has a client role
+  (`client-admin`/`client-staff`/`client-guest`) AND no expert role. Dual-role
+  users (e.g. `freelance-expert` + `client-admin`) don't count — those are
+  experts who toggled a client role on their own auto-generated company.
+  The Python sync now filters these out (2026-06-19) but the Bubble real-time
+  flow still POSTs them. Add the same gate in Bubble before calling
+  `PATCH /crm/account/:id`.
 
 ### 1.5 Project-Experts — `PATCH /crm/project-expert/:id`
 
