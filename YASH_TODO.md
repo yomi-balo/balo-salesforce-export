@@ -6,11 +6,37 @@ these transformations server-side, but real-time Bubble payloads bypass the
 transformer and hit the middleware directly — so Bubble flows need their own
 fixes for parity.
 
-> Maintained by Yomi/Claude as new issues come up. Last updated: 2026-06-19.
+> Maintained by Yomi/Claude as new issues come up. Last updated: 2026-06-19 (#2).
 
 ---
 
 ## Outstanding for Nick (Salesforce side)
+
+### `Product: bad value for restricted picklist: marketing-cloud-next` (2026-06-19)
+
+A project upsert was rejected because `marketing-cloud-next` isn't in the
+`Opportunity.Product__c` picklist. Bubble's product picklist now includes
+`marketing-cloud-next` (separate from legacy `marketing-cloud`). Add the
+value to the SF picklist (and any related global value set if applicable).
+
+Example payload: project `1781745425148x856406945571799000`
+("Marketing Cloud Deployment"), `"Product__c": "marketing-cloud-next"`.
+
+### `ENTITY_IS_DELETED` on `/crm/prospect` for Salesforce-the-company users (2026-06-19)
+
+Two `@salesforce.com` prospects failed with SF 500 in `ProspectAPI.upsertProspect`
+line 111:
+- Ash Panesar (apanesar@salesforce.com) — Apex `accountId: 001On00000geEosIAE`
+- Dishan de Silva (dishan.desilva@salesforce.com) — Apex `accountId: 001On00000geHDFIA2`
+
+```
+ENTITY_IS_DELETED, entity is deleted: [] | Class.ProspectAPI.upsertProspect: line 111, column 1
+```
+
+Both have `companyName: "Salesforce"`. Looks like the Apex finds an existing
+SF Account by some match key, then the subsequent UPDATE on that Account
+fails because the Account is in the recycle bin. Nick to investigate
+(undelete or change match logic to skip soft-deleted records).
 
 ### `Prospect upsert failed: bad value for restricted picklist field: Bad Data`
 
