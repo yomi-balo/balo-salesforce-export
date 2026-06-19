@@ -206,12 +206,13 @@ def transform_accounts(store):
         admin_uid = _safe_get(company, "Admin")
         admin_user = store.users.get(admin_uid, {}) if admin_uid else {}
 
-        # A company is "real" if at least one user has any client role. Dual-role users
-        # (e.g. freelance-expert + client-admin) count — they're real customers who are
-        # also experts on the platform.
+        # A company is "real" only if at least one user has a client role AND no expert role.
+        # Dual-role users (e.g. freelance-expert + client-admin) DON'T count — those are
+        # typically experts who toggled on a client role on their own auto-generated company.
         company_users = [u for u in store.users.values() if u.get("Company") == company["_id"]]
         has_real_client = any(
             CLIENT_ROLES.intersection(list_array_slugs(u.get("Roles", [])))
+            and not EXPERT_OR_ADMIN_ROLES.intersection(list_array_slugs(u.get("Roles", [])))
             for u in company_users
         ) if company_users else False
 

@@ -103,7 +103,7 @@ TARGETS = {
         "transformer": "transform_accounts",
         "row_checks": [
             ("blocked admin email", lambda r: not _is_blocked_email(r, "_admin_email")),
-            ("no real client users (expert-only dummy company)", lambda r: (
+            ("no pure-client users (expert-only or dual-role-only dummy company)", lambda r: (
                 r.get("_group") != "CLIENT" or r.get("_has_real_client", True)
             )),
         ],
