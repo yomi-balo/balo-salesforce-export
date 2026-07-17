@@ -4,8 +4,13 @@
 __pycache__/
 *.pyc
 
-# Output
-output/
+# Output (keep reports, ignore everything else)
+output/*
+!output/reports/
 
 # OS
 .DS_Store
+
+# Tooling
+.claude/
+.idea/

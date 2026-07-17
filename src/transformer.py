@@ -1,7 +1,11 @@
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 from src.config import (
     get_slug,
     get_display,
     join_array_slugs,
+    list_array_slugs,
     PROSPECT_STATUS,
     ACCOUNT_SOURCE,
     RECORD_TYPE_EXPERT_CONTACT,
@@ -9,7 +13,15 @@ from src.config import (
     RECORD_TYPE_CASE_OPPORTUNITY,
     RECORD_TYPE_PROJECT_OPPORTUNITY,
     SENSITIVE_FIELDS,
+    EXPERT_OR_ADMIN_ROLES,
+    CLIENT_ROLES,
 )
+
+
+# Balo is an Australian product. Bubble returns timestamps in UTC, but SF Date-only
+# fields truncate based on UTC — so a Bubble timestamp at 2026-05-05T15:08Z (which is
+# May 6 1:08 AM in Sydney) ends up displayed as May 5 in SF. Convert to local TZ first.
+_SYDNEY_TZ = ZoneInfo("Australia/Sydney")
 
 
 # --- Helpers ---
@@ -19,6 +31,55 @@ def _safe_get(record, key, default=""):
         return default
     val = record.get(key)
     return val if val is not None else default
+
+
+def _pricing_method_label(proj):
+    """Map Bubble's Pricing Model slug to the SF picklist value."""
+    slug = get_slug(proj.get("Pricing Model"))
+    mapping = {"hourly": "Times & Materials", "fixed": "Fixed Price"}
+    if not slug:
+        return ""
+    return mapping.get(slug, slug.replace("-", " ").title())
+
+
+def _payment_terms_label(proj):
+    """Compose human-readable payment terms string from Payment Structure + Upfront Percentage."""
+    structure = get_slug(proj.get("Payment Structure"))
+    if not structure:
+        return ""
+    if structure == "full-on-project-completion":
+        return "100% upon completion"
+    if structure == "full-upfront":
+        return "100% upfront"
+    if structure == "custom-upfront":
+        pct = proj.get("Upfront Percentage") or 0
+        try:
+            upfront = int(round(float(pct) * 100))
+        except (TypeError, ValueError):
+            upfront = 0
+        if upfront <= 0:
+            return "100% upon completion"
+        if upfront >= 100:
+            return "100% upfront"
+        return f"{upfront}% upfront and {100 - upfront}% upon completion"
+    return structure.replace("-", " ").capitalize()
+
+
+def _to_local_date(value):
+    """Convert a UTC ISO datetime string to a Sydney-local YYYY-MM-DD date string.
+
+    Returns "" for empty/None input. Returns the original value unchanged if it
+    can't be parsed as ISO (so non-datetime strings pass through safely).
+    """
+    if not value:
+        return ""
+    if not isinstance(value, str):
+        return value
+    try:
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return value
+    return dt.astimezone(_SYDNEY_TZ).date().isoformat()
 
 
 def _resolve_country(uid, store, field="Name"):
@@ -41,13 +102,21 @@ def _redact(record):
 
 
 def _smart_field(record, mode_slug, prefix):
-    """Select the correct field version based on Mode (AI/Manual/Final)."""
+    """Select the correct field version based on Mode (AI/Manual/Final).
+
+    Falls back to "(Final)" when the mode-specific field is empty — Bubble sometimes
+    only populates "Title (Final)" / "Description (Final)" even for manual/ai mode
+    requests, and we'd otherwise filter those out as if they had no title.
+    """
     if not mode_slug:
         return ""
     label = mode_slug if mode_slug in ("AI", "Manual", "Final") else mode_slug.capitalize()
     if label not in ("AI", "Manual", "Final"):
-        label = "Final"  # fallback
-    return _safe_get(record, f"{prefix} ({label})")
+        label = "Final"
+    val = _safe_get(record, f"{prefix} ({label})")
+    if not val and label != "Final":
+        val = _safe_get(record, f"{prefix} (Final)")
+    return val
 
 
 def _separator_row(label):
@@ -62,11 +131,59 @@ def _expert_user_id(expert_uid, store):
     return _safe_get(expert, "User", "")
 
 
+def _freelance_account_name(user):
+    """Synthetic SF Account Name for a freelance expert (e.g. 'David Chui (Freelance)').
+
+    Freelance experts have no agency; we mint one Account per expert so the
+    Contact has something to link to. `user` here is the profile_expert's
+    linked user record (post-_redact is fine — Name fields aren't sensitive).
+    """
+    first = _safe_get(user, "Name: First").strip()
+    last = _safe_get(user, "Name: Last").strip()
+    name = f"{first} {last}".strip() or _safe_get(user, "_id", "unknown")
+    return f"{name} (Freelance)"
+
+
+def _user_email(user):
+    """Bubble exposes user email at user.authentication.email.email (see
+    balo-bubble-data-api-swagger.json). _redact wipes the whole authentication
+    object, so email must be pulled out BEFORE redaction runs.
+    """
+    if not user:
+        return ""
+    auth = user.get("authentication")
+    if isinstance(auth, dict):
+        em = auth.get("email")
+        if isinstance(em, dict):
+            val = em.get("email")
+            if val:
+                return val
+    return user.get("email") or user.get("Email") or ""
+
+
 def _meeting_type_slug(meeting):
     t = meeting.get("Type")
     if isinstance(t, dict):
         return t.get("slug", "")
     return str(t) if t else ""
+
+
+# --- Provenance helpers ---
+#
+# Each transform_* returns (columns, rows, provenance) where provenance[i] is
+# the list of {table, _id, label} dicts describing which Bubble records were
+# read to build rows[i]. Separator rows get an empty list. `table` uses the
+# keys from config.TABLE_PATHS so it stays canonical across the codebase.
+
+def _src(table, _id, label=""):
+    """One source tuple, or None if _id is falsy (so caller can filter)."""
+    if not _id:
+        return None
+    return {"table": table, "_id": _id, "label": label}
+
+
+def _sources(*items):
+    return [x for x in items if x is not None]
 
 
 # --- Sheet Transformers ---
@@ -80,20 +197,37 @@ def transform_accounts(store):
         "Balo_Created_Date__c", "Stripe_Seller_ID__c", "Stripe_Connection_Status__c",
     ]
     rows = []
+    provenance = []
 
     # Client companies
     rows.append(_separator_row("Client Companies"))
+    provenance.append([])
     for company in store.clientcompanies:
         admin_uid = _safe_get(company, "Admin")
         admin_user = store.users.get(admin_uid, {}) if admin_uid else {}
 
+        # A company is "real" only if at least one user has a client role AND no expert role.
+        # Dual-role users (e.g. freelance-expert + client-admin) DON'T count — those are
+        # typically experts who toggled on a client role on their own auto-generated company.
+        company_users = [u for u in store.users.values() if u.get("Company") == company["_id"]]
+        has_real_client = any(
+            CLIENT_ROLES.intersection(list_array_slugs(u.get("Roles", [])))
+            and not EXPERT_OR_ADMIN_ROLES.intersection(list_array_slugs(u.get("Roles", [])))
+            for u in company_users
+        ) if company_users else False
+
         rows.append({
             "_group": "CLIENT",
+            "_has_real_client": has_real_client,
+            "_admin_roles": list_array_slugs(admin_user.get("Roles", [])),
+            "_admin_email": _safe_get(admin_user, "email", _safe_get(admin_user, "Email")),
             "Balo_Id__c": company["_id"],
             "Name": _safe_get(company, "Name"),
             "Phone": _safe_get(admin_user, "Phone"),
             "Website": "",
-            "Type": "Company",
+            # Type is set by the /crm/prospect Apex flow when the prospect was created.
+            # Omit here so we don't overwrite that value on subsequent account upserts.
+            "Type": "",
             "AccountSource": ACCOUNT_SOURCE,
             "Stripe_Customer_Id__c": _safe_get(company, "🤑 Stripe: Customer ID"),
             "Has_Booked_Consultation__c": _safe_get(company, "☑️ Consultation: Booked at least one"),
@@ -103,15 +237,22 @@ def transform_accounts(store):
             "Stripe_Seller_ID__c": "",
             "Stripe_Connection_Status__c": "",
         })
+        provenance.append(_sources(
+            _src("profile_clientcompany", company["_id"], "primary"),
+            _src("user", admin_uid, "admin (Phone)"),
+        ))
 
     # Agencies
     rows.append(_separator_row("Agencies"))
+    provenance.append([])
     for agency in store.agencies:
         admin_uid = _safe_get(agency, "Admin")
         admin_user = store.users.get(admin_uid, {}) if admin_uid else {}
 
         rows.append({
             "_group": "AGENCY",
+            "_admin_roles": list_array_slugs(admin_user.get("Roles", [])),
+            "_admin_email": _safe_get(admin_user, "email", _safe_get(admin_user, "Email")),
             "Balo_Id__c": agency["_id"],
             "Name": _safe_get(agency, "Name"),
             "Phone": _safe_get(admin_user, "Phone"),
@@ -126,8 +267,43 @@ def transform_accounts(store):
             "Stripe_Seller_ID__c": _safe_get(agency, "🤑 Stripe: Seller ID"),
             "Stripe_Connection_Status__c": _safe_get(agency, "🤑 Stripe: Connection Active"),
         })
+        provenance.append(_sources(
+            _src("profile_agency", agency["_id"], "primary"),
+            _src("user", admin_uid, "admin (Phone)"),
+        ))
 
-    return columns, rows
+    # Freelance experts — one synthetic Account per expert so freelance
+    # Contacts have an Account to link to. Balo_Id__c = profile_expert._id.
+    rows.append(_separator_row("Freelance Experts (synthetic accounts)"))
+    provenance.append([])
+    for eid, expert in store.experts.items():
+        if get_slug(expert.get("Expert type")) != "freelancer":
+            continue
+        user_uid = _safe_get(expert, "User")
+        user = store.users.get(user_uid, {})
+
+        rows.append({
+            "_group": "FREELANCE",
+            "Balo_Id__c": expert["_id"],
+            "Name": _freelance_account_name(user),
+            "Phone": _safe_get(user, "Phone"),
+            "Website": "",
+            "Type": "Expert",
+            "AccountSource": ACCOUNT_SOURCE,
+            "Stripe_Customer_Id__c": "",
+            "Has_Booked_Consultation__c": "",
+            "Has_Redeemed_Credits__c": "",
+            "Has_Submitted_Project__c": "",
+            "Balo_Created_Date__c": _safe_get(expert, "Created Date"),
+            "Stripe_Seller_ID__c": "",
+            "Stripe_Connection_Status__c": "",
+        })
+        provenance.append(_sources(
+            _src("profile_expert", expert["_id"], "primary"),
+            _src("user", user_uid, "user (Phone, Name)"),
+        ))
+
+    return columns, rows, provenance
 
 
 def transform_prospects_contacts(store):
@@ -146,59 +322,96 @@ def transform_prospects_contacts(store):
         "Consultation_Min_Rate__c", "Average_Rating__c", "Total_Reviews__c",
         "LinkedIn_URL__c", "Trailblazer_URL__c", "Headline__c",
         "Application_Status__c", "Expert_Unique_ID__c", "Cronofy_User_ID__c",
-        "MailingCountry", "Account.Balo_Id__c", "Balo_Role__c",
+        "MailingCountry", "Account.Balo_Id__c", "Balo_Role__c", "Balo_Roles__c", "Description",
     ]
     rows = []
+    provenance = []
+
+    # Users that route via /crm/account + /crm/contact (the "expert" path) instead of
+    # /crm/prospect (the "client" path). A user is an expert only when they (a) have
+    # a profile_expert record AND (b) have an expert/admin role in their user.Roles.
+    # Some client users have a draft/started expert profile from exploring the platform
+    # but only have client roles — those should still be routed as prospects.
+    expert_user_ids = {
+        expert.get("User")
+        for expert in store.experts.values()
+        if expert.get("User")
+        and EXPERT_OR_ADMIN_ROLES.intersection(
+            list_array_slugs(store.users.get(expert.get("User"), {}).get("Roles", []))
+        )
+    }
 
     # --- Client users grouped by company ---
     for company in store.clientcompanies:
         cid = company["_id"]
         company_name = _safe_get(company, "Name", cid)
         rows.append(_separator_row(company_name))
+        provenance.append([])
 
         for uid, user in store.users.items():
+            if uid in expert_user_ids:
+                continue  # routed as expert (Account + Contact), not prospect
+            email = _user_email(user)
             user = _redact(user)
             if _safe_get(user, "Company") != cid:
                 continue
-            rows.append(_build_client_prospect_row(user, company, store))
+            row, sources = _build_client_prospect_row(user, email, company, store)
+            rows.append(row)
+            provenance.append(sources)
 
     # --- Agency experts grouped by agency ---
     for agency in store.agencies:
         aid = agency["_id"]
         agency_name = _safe_get(agency, "Name", aid)
         rows.append(_separator_row(f"{agency_name} (Agency)"))
+        provenance.append([])
 
         for eid, expert in store.experts.items():
             if _safe_get(expert, "Agency") != aid:
                 continue
             user_uid = _safe_get(expert, "User")
-            user = _redact(store.users.get(user_uid, {}))
-            rows.append(_build_expert_prospect_row(user, expert, agency_name, aid, "Expert", agency, store))
+            raw_user = store.users.get(user_uid, {})
+            email = _user_email(raw_user)
+            user = _redact(raw_user)
+            row, sources = _build_expert_prospect_row(user, email, expert, agency_name, aid, "Expert", agency, store)
+            rows.append(row)
+            provenance.append(sources)
 
     # --- Freelance experts ---
     rows.append(_separator_row("Freelance Experts"))
+    provenance.append([])
     for eid, expert in store.experts.items():
         expert_type = get_slug(expert.get("Expert type"))
         if expert_type != "freelancer":
             continue
         user_uid = _safe_get(expert, "User")
-        user = _redact(store.users.get(user_uid, {}))
-        rows.append(_build_expert_prospect_row(user, expert, "", "", "", None, store))
+        raw_user = store.users.get(user_uid, {})
+        email = _user_email(raw_user)
+        user = _redact(raw_user)
+        # Per-expert synthetic Account — Balo_Id__c = profile_expert._id.
+        # The corresponding Account row is emitted by transform_accounts.
+        synth_name = _freelance_account_name(user)
+        synth_id = expert["_id"]
+        row, sources = _build_expert_prospect_row(
+            user, email, expert, synth_name, synth_id, "Expert", None, store
+        )
+        rows.append(row)
+        provenance.append(sources)
 
-    return columns, rows
+    return columns, rows, provenance
 
 
-def _build_client_prospect_row(user, company, store):
-    return {
+def _build_client_prospect_row(user, email, company, store):
+    row = {
         "_group": _safe_get(company, "Name"),
         "_contact_type": "CLIENT",
         "baloId": _safe_get(user, "_id"),
-        "email": _safe_get(user, "email", _safe_get(user, "Email")),
+        "email": email,
         "firstName": _safe_get(user, "Name: First"),
         "lastName": _safe_get(user, "Name: Last"),
         "phone": _safe_get(user, "Phone"),
         "baloRole": get_slug(user.get("Role: Active")),
-        "baloRoles": join_array_slugs(user.get("Roles", [])),
+        "baloRoles": list_array_slugs(user.get("Roles", [])),
         "prospectStatus": PROSPECT_STATUS,
         "signupDate": _safe_get(user, "Created Date"),
         "timezone": _safe_get(user, "⚙️ Timezone ID"),
@@ -206,7 +419,7 @@ def _build_client_prospect_row(user, company, store):
         "country": _resolve_country(_safe_get(user, "⚙️ Country"), store, "Name"),
         "baloAccountId": company["_id"],
         "companyName": _safe_get(company, "Name"),
-        "accountType": "Company",
+        "accountType": "Prospect",
         "baloAccountCreatedDate": _safe_get(company, "Created Date"),
         "RecordTypeId": RECORD_TYPE_CLIENT_CONTACT,
         "Expert_Type__c": "", "Is_Salesforce_Certified__c": "",
@@ -221,23 +434,29 @@ def _build_client_prospect_row(user, company, store):
         "Account.Balo_Id__c": company["_id"],
         "Balo_Role__c": get_slug(user.get("Role: Active")),
     }
+    sources = _sources(
+        _src("user", _safe_get(user, "_id"), "primary"),
+        _src("profile_clientcompany", company["_id"], "company"),
+        _src("country", _safe_get(user, "⚙️ Country"), "country (Name)"),
+    )
+    return row, sources
 
 
-def _build_expert_prospect_row(user, expert, account_name, account_id, account_type, account_record, store):
+def _build_expert_prospect_row(user, email, expert, account_name, account_id, account_type, account_record, store):
     certs = expert.get("Certifications", expert.get("Case", []))
     # Certifications may be stored as array; check if expert has any certification-related fields
     has_certs = bool(expert.get("Certifications")) or bool(expert.get("Certified Salesforce Trainer?"))
 
-    return {
+    row = {
         "_group": account_name or "Freelance",
         "_contact_type": "EXPERT",
         "baloId": _safe_get(user, "_id"),
-        "email": _safe_get(user, "email", _safe_get(user, "Email")),
+        "email": email,
         "firstName": _safe_get(user, "Name: First"),
         "lastName": _safe_get(user, "Name: Last"),
         "phone": _safe_get(user, "Phone"),
         "baloRole": get_slug(user.get("Role: Active")),
-        "baloRoles": join_array_slugs(user.get("Roles", [])),
+        "baloRoles": list_array_slugs(user.get("Roles", [])),
         "prospectStatus": PROSPECT_STATUS,
         "signupDate": _safe_get(user, "Created Date"),
         "timezone": _safe_get(user, "⚙️ Timezone ID"),
@@ -266,8 +485,19 @@ def _build_expert_prospect_row(user, expert, account_name, account_id, account_t
         "Cronofy_User_ID__c": _safe_get(expert, "⚙️ Cronofy User ID"),
         "MailingCountry": _resolve_country(_safe_get(expert, "Country"), store, "Alpha-2 code"),
         "Account.Balo_Id__c": account_id if account_id else "",
-        "Balo_Role__c": "",
+        "Balo_Role__c": get_slug(user.get("Role: Active")),
+        # SF multipicklist expects semicolon-separated string (the bare `baloRoles` array
+        # form is for the /crm/prospect Apex endpoint).
+        "Balo_Roles__c": join_array_slugs(user.get("Roles", [])),
+        "Description": _safe_get(expert, "Profile Description"),
     }
+    sources = _sources(
+        _src("user", _safe_get(user, "_id"), "primary"),
+        _src("profile_expert", expert.get("_id"), "expert profile"),
+        _src("profile_agency", account_id, "agency") if account_type == "Expert" else None,
+        _src("country", _safe_get(expert, "Country"), "MailingCountry (Alpha-2)"),
+    )
+    return row, sources
 
 
 def transform_opportunities_cases(store):
@@ -275,11 +505,12 @@ def transform_opportunities_cases(store):
     columns = [
         "_group", "Balo_Id__c", "Name", "CloseDate", "StageName", "RecordTypeId",
         "Balo_Case_Number__c", "Description", "Total_Consultation_Minutes__c",
-        "Total_Credits_Used__c", "Amount", "Balo_Created_Date__c",
-        "Product__c", "Type_Of_Support__c",
+        "Total_Credits_Used__c", "Amount", "Expert_Earnings__c", "Balo_Created_Date__c",
+        "Product__c", "Type_of_Support__c",
         "Account.Balo_Id__c", "Primary_Contact__r.Balo_Id__c", "Expert__r.Balo_Id__c",
     ]
     rows = []
+    provenance = []
 
     # Group cases by client company
     company_map = {c["_id"]: c for c in store.clientcompanies}
@@ -292,6 +523,7 @@ def transform_opportunities_cases(store):
 
         if cc_uid != current_company:
             rows.append(_separator_row(company_name))
+            provenance.append([])
             current_company = cc_uid
 
         # Support field: may be single option set or array
@@ -303,31 +535,40 @@ def transform_opportunities_cases(store):
 
         # First expert's user _id
         expert_profiles = case.get("Expert Profiles", [])
-        expert_user_uid = ""
-        if expert_profiles:
-            expert_user_uid = _expert_user_id(expert_profiles[0], store)
+        expert_profile_uid = expert_profiles[0] if expert_profiles else ""
+        expert_user_uid = _expert_user_id(expert_profile_uid, store) if expert_profile_uid else ""
+
+        # StageName: SF picklist expects Title-case ("Ongoing"), Bubble stores slugs ("ongoing").
+        status_val = case.get("Status")
+        stage_name = get_display(status_val) if isinstance(status_val, dict) else (str(status_val).capitalize() if status_val else "")
 
         rows.append({
             "_group": company_name,
             "Balo_Id__c": case["_id"],
             "Name": _safe_get(case, "Title"),
             "CloseDate": "",  # intentionally blank
-            "StageName": get_slug(case.get("Status")),
+            "StageName": stage_name,
             "RecordTypeId": RECORD_TYPE_CASE_OPPORTUNITY,
             "Balo_Case_Number__c": _safe_get(case, "Case ID"),
             "Description": _safe_get(case, "Description"),
             "Total_Consultation_Minutes__c": _safe_get(case, "Total consultation minutes"),
             "Total_Credits_Used__c": _safe_get(case, "Total credits used"),
-            "Amount": _safe_get(case, "Total amount earned"),
+            "Amount": _safe_get(case, "Total credits used"),
+            "Expert_Earnings__c": _safe_get(case, "Total amount earned"),
             "Balo_Created_Date__c": _safe_get(case, "Created Date"),
             "Product__c": join_array_slugs(case.get("Products", [])),
-            "Type_Of_Support__c": type_of_support,
+            "Type_of_Support__c": type_of_support,
             "Account.Balo_Id__c": cc_uid,
             "Primary_Contact__r.Balo_Id__c": _safe_get(case, "Client user"),
             "Expert__r.Balo_Id__c": expert_user_uid,
         })
+        provenance.append(_sources(
+            _src("case", case["_id"], "primary"),
+            _src("profile_clientcompany", cc_uid, "client company"),
+            _src("profile_expert", expert_profile_uid, "first expert profile"),
+        ))
 
-    return columns, rows
+    return columns, rows, provenance
 
 
 def transform_opportunities_projects(store):
@@ -343,8 +584,10 @@ def transform_opportunities_projects(store):
         "Related_Case__r.Balo_Id__c",
     ]
     rows = []
+    provenance = []
 
     company_map = {c["_id"]: c for c in store.clientcompanies}
+    case_map = {c["_id"]: c for c in store.cases}
 
     for req in store.project_requests:
         cc_uid = _safe_get(req, "Client Company")
@@ -353,14 +596,15 @@ def transform_opportunities_projects(store):
 
         has_final = bool(req.get("Final EOI") or req.get("Final Project/Proposal"))
         mode_slug = get_slug(req.get("Mode"))
+        proj_uid = ""
 
         if has_final:
-            proj_uid = req.get("Final Project/Proposal")
+            proj_uid = req.get("Final Project/Proposal") or ""
             proj = store.projects.get(proj_uid, {})
             name = _safe_get(proj, "Project title")
             stage_name = "Project"
             sub_status = get_slug(proj.get("Status"))
-            close_date = _safe_get(proj, "Estimated Completion Date")
+            close_date = _to_local_date(_safe_get(proj, "Estimated Completion Date"))
             description = _safe_get(proj, "Project description (RT)")
             created_date = _safe_get(proj, "Created Date")
             project_id = _safe_get(proj, "_id")
@@ -401,7 +645,7 @@ def transform_opportunities_projects(store):
             "Package__c": _safe_get(req, "Package"),
             "Active_Proposal_Count__c": _safe_get(req, "Active Proposal Count"),
             "Discovery_Insights__c": _safe_get(req, "Discovery Call Insights"),
-            "Submitted_Date__c": _safe_get(req, "Submitted Date"),
+            "Submitted_Date__c": _to_local_date(_safe_get(req, "Submitted Date")),
             "Balo_Created_Date__c": created_date,
             "Product__c": join_array_slugs(product_arr) if isinstance(product_arr, list) else str(product_arr or ""),
             "Project_ID__c": project_id,
@@ -410,22 +654,45 @@ def transform_opportunities_projects(store):
             "Expert_Earnings__c": expert_earnings,
             "Account.Balo_Id__c": cc_uid,
             "Primary_Contact__r.Balo_Id__c": _safe_get(req, "Client User"),
-            "Related_Case__r.Balo_Id__c": _safe_get(req, "Selected Case"),
+            "Related_Case__r.Balo_Case_Number__c": _safe_get(
+                case_map.get(_safe_get(req, "Selected Case"), {}), "Case ID"
+            ),
         })
+        provenance.append(_sources(
+            _src("project_request", req["_id"], "request"),
+            _src("project", proj_uid, "finalized project") if has_final else None,
+            _src("profile_clientcompany", cc_uid, "client company"),
+        ))
 
-    return columns, rows
+    return columns, rows, provenance
 
 
 def transform_project_experts(store):
     """Sheet 5: Expert-Project links (Project__c)."""
     columns = [
-        "_group", "Balo_Id__c", "Expert_EOI_Status__c",
+        "_group", "Balo_Id__c",
+        "EOI_Status__c", "EOI_Submitted_Date__c", "Proposal_Submitted_Date__c",
+        "Finalized_Date__c", "Proposal_Status__c", "Estimated_Completion_Date__c",
+        "Experts_Proposed_Cost__c", "Pricing_Method__c", "Hourly_Rate__c",
+        "Payment_Terms__c", "Customer_Cost__c", "Total_Hours__c",
         "Opportunity__r.Balo_Id__c", "Expert__r.Balo_Id__c",
     ]
     rows = []
+    provenance = []
 
     req_map = {r["_id"]: r for r in store.project_requests}
     company_map = {c["_id"]: c for c in store.clientcompanies}
+
+    # Pre-compute total hours per project from deliverables
+    project_hours = {}
+    for d in store.deliverables:
+        proj_uid = _safe_get(d, "Project")
+        hours = _safe_get(d, "Hours", 0)
+        if proj_uid and hours:
+            try:
+                project_hours[proj_uid] = project_hours.get(proj_uid, 0) + float(hours)
+            except (ValueError, TypeError):
+                pass
 
     for eoi in store.project_eois:
         req_uid = _safe_get(eoi, "Request")
@@ -437,22 +704,57 @@ def transform_project_experts(store):
         expert_uid = _safe_get(eoi, "Expert")
         expert_user_uid = _expert_user_id(expert_uid, store)
 
+        # EOI.Proposal links directly to the Project (if one exists)
+        proj_uid = _safe_get(eoi, "Proposal")
+        proj = store.projects.get(proj_uid, {}) if proj_uid else {}
+
+        # Total hours from deliverables (if available)
+        total_hours = project_hours.get(proj_uid, "") if proj_uid else ""
+
+        # Finalized date = when the client accepted the proposal. Bubble has no explicit
+        # "Accepted Date" field, so we use the EOI's Modified Date (only meaningful when
+        # the EOI has been finalized — i.e., the last change was the status flip to
+        # 'finalized'). Falls back to empty for non-finalized EOIs.
+        eoi_status_slug = get_slug(eoi.get("Status"))
+        finalized_date = _safe_get(eoi, "Modified Date") if eoi_status_slug == "finalized" else ""
+
         rows.append({
             "_group": company_name,
             "Balo_Id__c": f"{req_uid}-{expert_user_uid}" if req_uid and expert_user_uid else "",
-            "Expert_EOI_Status__c": get_slug(eoi.get("Status")),
+            # EOI fields
+            "EOI_Status__c": eoi_status_slug,
+            "EOI_Submitted_Date__c": _to_local_date(_safe_get(eoi, "Created Date")),
+            "Proposal_Submitted_Date__c": _to_local_date(_safe_get(eoi, "Pitch Submitted at")),
+            # Project fields (empty if no finalized project)
+            "Finalized_Date__c": _to_local_date(finalized_date),
+            "Proposal_Status__c": get_slug(proj.get("Status")),
+            "Estimated_Completion_Date__c": _to_local_date(_safe_get(proj, "Estimated Completion Date")),
+            "Experts_Proposed_Cost__c": _safe_get(proj, "Total Cost (Excluding Fees)"),
+            "Pricing_Method__c": _pricing_method_label(proj),
+            "Hourly_Rate__c": _safe_get(proj, "Hourly Rate (Excluding fees)"),
+            "Payment_Terms__c": _payment_terms_label(proj),
+            "Customer_Cost__c": _safe_get(proj, "Total Cost (Including Fees)"),
+            "Total_Hours__c": total_hours,
             "Opportunity__r.Balo_Id__c": req_uid,
             "Expert__r.Balo_Id__c": expert_user_uid,
         })
+        provenance.append(_sources(
+            _src("project_eoi", eoi["_id"], "primary"),
+            _src("project_request", req_uid, "request"),
+            _src("project", proj_uid, "finalized project") if proj_uid else None,
+            _src("profile_expert", expert_uid, "expert profile"),
+            _src("profile_clientcompany", cc_uid, "client company"),
+        ))
 
-    return columns, rows
+    return columns, rows, provenance
 
 
 def transform_consultations(store):
     """Sheet 6: Consultations — primary table is meeting."""
     columns = [
         "_group", "_meeting_type", "Balo_Id__c",
-        "Opportunity__r.Balo_Id__c", "Project__r.Balo_Id__c",
+        "Opportunity__r.Balo_Id__c", "Opportunity__r.Balo_Case_Number__c",
+        "Project__r.Balo_Id__c",
         "Expert__r.Balo_Id__c", "Scheduled_DateTime__c",
         "Start_Time__c", "End_Time__c", "Actual_End_Time__c",
         "Duration_Minutes__c", "Actual_Duration_Minutes__c",
@@ -464,6 +766,7 @@ def transform_consultations(store):
         "Participants_Present__c", "Balo_Created_Date__c",
     ]
     rows = []
+    provenance = []
 
     company_map = {c["_id"]: c for c in store.clientcompanies}
 
@@ -481,16 +784,22 @@ def transform_consultations(store):
     # Consultation meetings first
     if consult_meetings:
         rows.append(_separator_row("Consultations (metered billing)"))
+        provenance.append([])
     for meeting in consult_meetings:
-        rows.append(_build_meeting_row(meeting, store, company_map))
+        row, sources = _build_meeting_row(meeting, store, company_map)
+        rows.append(row)
+        provenance.append(sources)
 
     # Project meetings
     if project_meetings:
         rows.append(_separator_row("Project Meetings (free)"))
+        provenance.append([])
     for meeting in project_meetings:
-        rows.append(_build_meeting_row(meeting, store, company_map))
+        row, sources = _build_meeting_row(meeting, store, company_map)
+        rows.append(row)
+        provenance.append(sources)
 
-    return columns, rows
+    return columns, rows, provenance
 
 
 def _build_meeting_row(meeting, store, company_map):
@@ -512,11 +821,18 @@ def _build_meeting_row(meeting, store, company_map):
     estimated_cost = ""
     final_cost = ""
     gst_amount = ""
+    consult_uid = ""
+    pm_uid = ""
+    pm_expert_uid = ""
 
     if is_consultation:
         consult_uid = _safe_get(meeting, "🆕 Consultation")
         consult = store.consultations.get(consult_uid, {})
-        opp_id = _safe_get(consult, "Case")
+        # Case Opportunities are keyed by Balo_Case_Number__c (e.g., "LEA-60666"),
+        # not Balo_Id__c. Resolve the case Bubble UID to its Case ID for the FK.
+        case_uid = _safe_get(consult, "Case")
+        case_record = next((c for c in store.cases if c.get("_id") == case_uid), {})
+        opp_id = _safe_get(case_record, "Case ID")
         expert_rate = _safe_get(consult, "Expert Rate")
         estimated_cost = _safe_get(consult, "Cost estimated")
         final_cost = _safe_get(consult, "Cost Incurred Final")
@@ -524,7 +840,14 @@ def _build_meeting_row(meeting, store, company_map):
     else:
         pm_uid = _safe_get(meeting, "🆕 Project Meeting")
         pm = store.projectmeetings.get(pm_uid, {})
-        pr_uid = _safe_get(pm, "Project Request", _safe_get(pm, "Project"))
+        # Project__c records are keyed by {project_request_uid}-{expert_user_uid}.
+        # Some projectmeetings only have a Project link, not a Project Request — resolve
+        # through the project record in that case.
+        pr_uid = _safe_get(pm, "Project Request")
+        if not pr_uid:
+            proj_uid = _safe_get(pm, "Project")
+            if proj_uid:
+                pr_uid = _safe_get(store.projects.get(proj_uid, {}), "Project Request")
         pm_expert_uid = _safe_get(pm, "Expert")
         pm_expert_user = _expert_user_id(pm_expert_uid, store) if pm_expert_uid else ""
         if pr_uid and pm_expert_user:
@@ -549,11 +872,14 @@ def _build_meeting_row(meeting, store, company_map):
     billing_val = meeting.get("🆕 Billing Mode")
     billing = get_display(billing_val) if isinstance(billing_val, dict) else (str(billing_val).capitalize() if billing_val else "")
 
-    return {
+    # Case opportunities use Balo_Case_Number__c as external ID; projects use Balo_Id__c.
+    opp_key = "Opportunity__r.Balo_Case_Number__c" if is_consultation else "Opportunity__r.Balo_Id__c"
+
+    row = {
         "_group": company_name,
         "_meeting_type": type_slug,
         "Balo_Id__c": meeting["_id"],
-        "Opportunity__r.Balo_Id__c": opp_id,
+        opp_key: opp_id,
         "Project__r.Balo_Id__c": proj_id,
         "Expert__r.Balo_Id__c": expert_user_uid,
         "Scheduled_DateTime__c": _safe_get(meeting, "Created Date"),
@@ -575,13 +901,28 @@ def _build_meeting_row(meeting, store, company_map):
         "Expert_Join_Time__c": _safe_get(meeting, "Organiser Join time"),
         "Ended_By_Expert__c": _safe_get(meeting, "Ended by Organizer"),
         "Ended_By_Client__c": _safe_get(meeting, "Ended by Invitor"),
-        "Participants_Present__c": "",  # always empty per spec
+        # SF requires True/False (not null). Bubble only computes "Summary Present [Temp]"
+        # for completed meetings — missed/cancelled meetings have no value, default to False.
+        "Participants_Present__c": bool(meeting.get("Summary Present [Temp]")),
         "Balo_Created_Date__c": _safe_get(meeting, "Created Date"),
     }
+    sources = _sources(
+        _src("meeting", meeting["_id"], "primary"),
+        _src("consultation", consult_uid, "consultation") if is_consultation else None,
+        _src("projectmeeting", pm_uid, "project meeting") if not is_consultation else None,
+        _src("profile_expert", expert_profile_uid, "meeting expert profile"),
+        _src("profile_expert", pm_expert_uid, "PM expert profile") if not is_consultation else None,
+        _src("profile_clientcompany", cc_uid, "client company"),
+    )
+    return row, sources
 
 
 def transform_all(store):
-    """Run all transformers and return a dict of {sheet_name: (columns, rows)}."""
+    """Run all transformers and return a dict of {sheet_name: (columns, rows, provenance)}.
+
+    provenance[i] is the list of {table, _id, label} dicts describing which
+    Bubble records were read to build rows[i]. Separator rows have [].
+    """
     return {
         "Accounts": transform_accounts(store),
         "Prospects & Contacts": transform_prospects_contacts(store),

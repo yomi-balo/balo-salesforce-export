@@ -28,6 +28,7 @@ class DataStore:
         self.consultations = {}
         self.projectmeetings = {}
         self.packages = {}
+        self.deliverables = []
 
         # Warnings accumulated during fetch
         self.warnings = []
@@ -87,6 +88,189 @@ class Fetcher:
         self._round4_meetings()
         self._round5_packages()
         return self.store
+
+    # --- Historic full-enumeration fetch (used by sync.py) ---
+
+    def fetch_all_historic(self, modified_since=None):
+        """Enumerate every table in full for the sync path.
+
+        When modified_since is provided, rows are filtered by
+        `Modified Date > modified_since`. A second BFS pass then pulls any
+        FK-referenced record that's missing from the store (so a child
+        modified after the cursor can still resolve an unchanged parent).
+
+        Countries are a reference table — always fetched in full, ignoring
+        modified_since.
+        """
+        label = f"modified since {modified_since}" if modified_since else "full backfill"
+        self._log(f"Historic fetch ({label})")
+
+        constraints = None
+        if modified_since:
+            constraints = [{
+                "key": "Modified Date",
+                "constraint_type": "greater than",
+                "value": modified_since,
+            }]
+
+        # List tables (order preserved by fetch order).
+        self._load_list("clientcompanies", "profile_clientcompany", constraints)
+        self._load_list("agencies",        "profile_agency",        constraints)
+        self._load_list("cases",           "case",                  constraints)
+        self._load_list("project_requests", "project_request",      constraints)
+        self._load_list("project_eois",    "project_eoi",           constraints)
+        self._load_list("deliverables",    "deliverable",           constraints)
+        self._load_list("meetings",        "meeting",               constraints)
+
+        # Dict tables (random-access from FKs).
+        self._load_dict("users",           "user",                  constraints)
+        self._load_dict("experts",         "profile_expert",        constraints)
+        self._load_dict("projects",        "project",               constraints)
+        self._load_dict("consultations",   "consultation",          constraints)
+        self._load_dict("projectmeetings", "projectmeeting",        constraints)
+        self._load_dict("packages",        "package",               constraints)
+
+        # Countries: reference table, always full.
+        self._log("  countries (reference, full load)")
+        for c in self.client.fetch_all_pages(TABLE_PATHS["country"]):
+            self.store.countries[c["_id"]] = c
+        self._log(f"    -> {len(self.store.countries)} countries")
+
+        # Second pass: pull any FK-referenced record not already loaded.
+        self._resolve_missing_parents()
+        return self.store
+
+    def _load_list(self, attr, table_key, constraints):
+        """Fetch every row of a table into store.<attr> (a list)."""
+        records = self.client.fetch_all_pages(TABLE_PATHS[table_key], constraints=constraints)
+        bucket = getattr(self.store, attr)
+        seen = {r["_id"] for r in bucket}
+        for r in records:
+            if r["_id"] in seen:
+                continue
+            bucket.append(r)
+            seen.add(r["_id"])
+        self._log(f"  {attr}: {len(records)} fetched ({len(bucket)} total)")
+
+    def _load_dict(self, attr, table_key, constraints):
+        """Fetch every row of a table into store.<attr> (a dict keyed by _id)."""
+        records = self.client.fetch_all_pages(TABLE_PATHS[table_key], constraints=constraints)
+        bucket = getattr(self.store, attr)
+        for r in records:
+            bucket[r["_id"]] = r
+        self._log(f"  {attr}: {len(records)} fetched ({len(bucket)} total)")
+
+    def _resolve_missing_parents(self):
+        """BFS: for every loaded record, pull any FK-referenced record that's
+        not already in the store. Newly pulled records are scanned too, until
+        the queue drains.
+
+        The (table_key, store_attr, is_list, fk_fields) tuples below enumerate
+        which fields each loaded record pulls. Keeping this table-driven means
+        new entities only need one row here instead of scattered conditionals.
+        """
+        self._log("Resolving missing FK parents...")
+
+        # For each source bucket, list the FKs that reference other tables.
+        # fk_fields: list of (field_name, is_array, target_table_key, target_store_attr, target_is_list)
+        rules = {
+            "clientcompanies": ("list", [
+                ("Admin", False, "user", "users", False),
+            ]),
+            "agencies": ("list", [
+                ("Admin", False, "user", "users", False),
+            ]),
+            "users": ("dict", [
+                ("Company", False, "profile_clientcompany", "clientcompanies", True),
+            ]),
+            "experts": ("dict", [
+                ("User",   False, "user",            "users",           False),
+                ("Agency", False, "profile_agency",  "agencies",        True),
+            ]),
+            "cases": ("list", [
+                ("Client company",  False, "profile_clientcompany", "clientcompanies", True),
+                ("Expert Profiles", True,  "profile_expert",        "experts",         False),
+            ]),
+            "project_requests": ("list", [
+                ("Client Company",         False, "profile_clientcompany", "clientcompanies", True),
+                ("Final Project/Proposal", False, "project",               "projects",        False),
+                ("Package",                False, "package",               "packages",        False),
+            ]),
+            "project_eois": ("list", [
+                ("Request", False, "project_request", "project_requests", True),
+                ("Expert",  False, "profile_expert",  "experts",          False),
+            ]),
+            "meetings": ("list", [
+                ("Client Company",    False, "profile_clientcompany", "clientcompanies",  True),
+                ("Profile Expert",    False, "profile_expert",        "experts",          False),
+                ("🆕 Consultation",    False, "consultation",          "consultations",    False),
+                ("🆕 Project Meeting", False, "projectmeeting",        "projectmeetings",  False),
+            ]),
+            "projectmeetings": ("dict", [
+                ("Expert", False, "profile_expert", "experts", False),
+            ]),
+        }
+
+        added_total = 0
+
+        # BFS: queue of (target_table_key, _id, target_store_attr, target_is_list)
+        # Walk until no new records pulled in a full pass.
+        while True:
+            pulled_this_pass = 0
+
+            # Collect current ids per bucket for fast "already loaded" checks.
+            loaded_ids = {
+                "clientcompanies":  {c["_id"] for c in self.store.clientcompanies},
+                "agencies":         {a["_id"] for a in self.store.agencies},
+                "cases":            {c["_id"] for c in self.store.cases},
+                "project_requests": {r["_id"] for r in self.store.project_requests},
+                "project_eois":     {e["_id"] for e in self.store.project_eois},
+                "deliverables":     {d["_id"] for d in self.store.deliverables},
+                "meetings":         {m["_id"] for m in self.store.meetings},
+                "users":            set(self.store.users.keys()),
+                "experts":          set(self.store.experts.keys()),
+                "projects":         set(self.store.projects.keys()),
+                "consultations":    set(self.store.consultations.keys()),
+                "projectmeetings":  set(self.store.projectmeetings.keys()),
+                "packages":         set(self.store.packages.keys()),
+            }
+
+            for source_attr, (kind, fk_fields) in rules.items():
+                source_records = (
+                    getattr(self.store, source_attr)
+                    if kind == "list"
+                    else getattr(self.store, source_attr).values()
+                )
+                for rec in source_records:
+                    for field_name, is_array, target_table_key, target_attr, target_is_list in fk_fields:
+                        val = rec.get(field_name)
+                        if not val:
+                            continue
+                        ids = val if is_array and isinstance(val, list) else [val]
+                        for uid in ids:
+                            if not uid or uid in loaded_ids[target_attr]:
+                                continue
+                            fetched = self.client.fetch_record(TABLE_PATHS[target_table_key], uid)
+                            if not fetched:
+                                self.store.warnings.append(
+                                    f"Missing parent {target_table_key} {uid} "
+                                    f"(referenced by {source_attr}.{field_name})"
+                                )
+                                # Mark seen so we don't retry on the next pass.
+                                loaded_ids[target_attr].add(uid)
+                                continue
+                            if target_is_list:
+                                getattr(self.store, target_attr).append(fetched)
+                            else:
+                                getattr(self.store, target_attr)[uid] = fetched
+                            loaded_ids[target_attr].add(uid)
+                            pulled_this_pass += 1
+
+            added_total += pulled_this_pass
+            if pulled_this_pass == 0:
+                break
+
+        self._log(f"  -> pulled {added_total} missing parent records")
 
     # --- Round 1: Anchor entities ---
 

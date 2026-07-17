@@ -40,7 +40,8 @@ def write_workbook(sheets_data, output_path, warnings=None):
     """Generate the full XLSX workbook.
 
     Args:
-        sheets_data: dict of {sheet_name: (columns, rows)} from transformer
+        sheets_data: dict of {sheet_name: (columns, rows, provenance)} from transformer.
+            Provenance is ignored by the XLSX writer (it is used by the sync.db log).
         output_path: file path for the .xlsx
         warnings: optional list of warning strings
     """
@@ -64,7 +65,10 @@ def write_workbook(sheets_data, output_path, warnings=None):
     for sheet_name in sheet_order:
         if sheet_name not in sheets_data:
             continue
-        columns, rows = sheets_data[sheet_name]
+        data = sheets_data[sheet_name]
+        # Accept the new (columns, rows, provenance) 3-tuple as well as the
+        # legacy 2-tuple — provenance is not used for XLSX rendering.
+        columns, rows = data[0], data[1]
         ws = wb.create_sheet(title=sheet_name)
         ws.sheet_properties.tabColor = TAB_COLORS.get(sheet_name, "000000")
         _write_data_sheet(ws, columns, rows)
