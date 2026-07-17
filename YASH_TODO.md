@@ -6,21 +6,25 @@ these transformations server-side, but real-time Bubble payloads bypass the
 transformer and hit the middleware directly — so Bubble flows need their own
 fixes for parity.
 
-> Maintained by Yomi/Claude as new issues come up. Last updated: 2026-06-19 (#2).
+> Maintained by Yomi/Claude as new issues come up. Last updated: 2026-07-14.
 
 ---
 
 ## Outstanding for Nick (Salesforce side)
 
-### `Product: bad value for restricted picklist: marketing-cloud-next` (2026-06-19)
+### `Product: bad value for restricted picklist` — missing values (2026-06-19 → 2026-07-14)
 
-A project upsert was rejected because `marketing-cloud-next` isn't in the
-`Opportunity.Product__c` picklist. Bubble's product picklist now includes
-`marketing-cloud-next` (separate from legacy `marketing-cloud`). Add the
-value to the SF picklist (and any related global value set if applicable).
+`Opportunity.Product__c` picklist is missing values Bubble now emits. Add these
+to the SF picklist (and any related global value set if applicable):
 
-Example payload: project `1781745425148x856406945571799000`
-("Marketing Cloud Deployment"), `"Product__c": "marketing-cloud-next"`.
+- `marketing-cloud-next` (1 project failed 2026-06-19; still failing 2026-07-14)
+- `data-360` (7 projects failed 2026-07-14)
+
+Example failing projects (2026-07-14):
+- "Marketing Cloud Deployment" → `marketing-cloud-next`
+- "Form Submission UTM Tracking Implementation", "Field Service Enhancements",
+  "Bucket of support hours", "Paramount Liquor - Data Storage Help",
+  "Gravity Forms + Website User Tracking Integration..." → `data-360`
 
 ### `ENTITY_IS_DELETED` on `/crm/prospect` for Salesforce-the-company users (2026-06-19)
 
