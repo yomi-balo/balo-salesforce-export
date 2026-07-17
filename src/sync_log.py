@@ -155,6 +155,28 @@ class SyncLog:
         ).fetchone()
         return bool(row)
 
+    def last_successful_payload(self, balo_id: str, route: str) -> dict | None:
+        """Return the payload from the most recent 202 send, or None.
+
+        Used by sync.py to diff the current Bubble payload against the last
+        successful send so we can skip unchanged records and only PATCH
+        changed fields (preserving SF-side edits on untouched fields).
+        """
+        row = self._conn.execute(
+            """
+            SELECT payload FROM sync_events
+             WHERE balo_id = ? AND route = ? AND http_status = 202
+             ORDER BY id DESC LIMIT 1
+            """,
+            (balo_id, route),
+        ).fetchone()
+        if not row or not row["payload"]:
+            return None
+        try:
+            return json.loads(row["payload"])
+        except json.JSONDecodeError:
+            return None
+
     def list_by_status(self, sf_status: str) -> list[dict[str, Any]]:
         rows = self._conn.execute(
             "SELECT * FROM sync_events WHERE sf_status = ? ORDER BY id DESC",

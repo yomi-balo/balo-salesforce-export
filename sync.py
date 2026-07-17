@@ -13,7 +13,7 @@ One subcommand per route. Fetch → transform → send.
     python sync.py consultations
 
 Shared flags:
-    --limit N        stop after N successful sends (skipped rows don't count)
+    --limit N        stop after N successful sends (unchanged rows don't count)
     --dry-run        fetch + transform + log to sync.db, but do NOT POST
     --since <iso>    override the auto-derived modified_since cursor
     --full           ignore the cursor, fetch everything (first run / backfill)
@@ -24,14 +24,17 @@ Cursor:
     recent finished run of that subcommand (stored in sync.db / sync_runs).
     Use --full for the initial historic backfill. Use --since to override.
 
-Resume-on-crash and "don't resend":
-    Every attempt is logged to sync.db before the HTTP call. If a row already
-    has a 202 response for the same route, it's skipped on subsequent runs.
+Payload diffing (protects SF-side edits):
+    Before sending, the current Bubble payload is diffed against the last
+    successful send (stored in sync.db). If identical -> skip entirely
+    (unchanged). If some fields changed -> PATCH routes send only those
+    fields (SF PATCH leaves untouched fields alone). The POST /crm/prospect
+    route sends the full payload because Nick's Apex expects it complete;
+    the Apex has its own dedupe.
 
 On failure:
     Stops on the first non-202 / network error. completed_at is NOT written,
-    so the cursor doesn't advance — next run re-attempts from the same point,
-    skipping anything already-sent.
+    so the cursor doesn't advance — next run re-attempts from the same point.
 """
 
 from __future__ import annotations
@@ -331,6 +334,34 @@ def _check_row(row, row_checks):
     return True, None
 
 
+def _diff_payload(current: dict, last: dict) -> dict:
+    """Return the keys+values from `current` that differ from `last`.
+
+    Nested dicts recurse: if any leaf inside differs, the *full* nested dict
+    is included (SF PATCH requires the FK identifier field, e.g.
+    Balo_Id__c, to be present inside a reference object like Account or
+    Primary_Contact__r — omitting it would break the FK match).
+
+    Keys present in `last` but absent in `current` are intentionally NOT
+    included (no null-wipes) — matches omit_if_empty semantics and
+    preserves SF-side edits on fields Bubble no longer sends.
+    """
+    diff: dict = {}
+    for k, v_new in current.items():
+        v_old = last.get(k)
+        if isinstance(v_new, dict) and isinstance(v_old, dict):
+            inner = _diff_payload(v_new, v_old)
+            if inner:
+                # Send the full nested object (identifier + changed fields)
+                diff[k] = v_new
+        elif isinstance(v_new, dict):
+            # New nested object where old had a scalar or nothing
+            diff[k] = v_new
+        elif v_new != v_old:
+            diff[k] = v_new
+    return diff
+
+
 def _build_name(row, name_key):
     """Build a human-readable label from the row for the audit report."""
     parts = [str(row.get(k) or "") for k in name_key]
@@ -338,7 +369,7 @@ def _build_name(row, name_key):
 
 
 def _write_report(target_key, target, cursor_label, total_rows,
-                  sent, filtered, skipped, errors, warnings):
+                  sent, filtered, unchanged, errors, warnings):
     """Write a per-run Markdown audit report to output/reports/."""
     reports_dir = os.path.join("output", "reports")
     os.makedirs(reports_dir, exist_ok=True)
@@ -361,9 +392,9 @@ def _write_report(target_key, target, cursor_label, total_rows,
     lines.append("|--------|-------|")
     lines.append(f"| Sent | {len(sent)} |")
     lines.append(f"| Filtered | {len(filtered)} |")
-    lines.append(f"| Skipped (already sent) | {len(skipped)} |")
+    lines.append(f"| Unchanged (payload identical to last send) | {len(unchanged)} |")
     lines.append(f"| Errors | {len(errors)} |")
-    lines.append(f"| **Total** | {len(sent) + len(filtered) + len(skipped) + len(errors)} |")
+    lines.append(f"| **Total** | {len(sent) + len(filtered) + len(unchanged) + len(errors)} |")
     lines.append("")
 
     # Filtered
@@ -388,12 +419,12 @@ def _write_report(target_key, target, cursor_label, total_rows,
         lines.append("(none)")
     lines.append("")
 
-    # Skipped
-    lines.append(f"## Skipped - already sent ({len(skipped)})")
-    if skipped:
+    # Unchanged (Bubble payload identical to last successful send)
+    lines.append(f"## Unchanged ({len(unchanged)})")
+    if unchanged:
         lines.append("| # | Balo ID | Name |")
         lines.append("|---|---------|------|")
-        for i, (balo_id, name) in enumerate(skipped, 1):
+        for i, (balo_id, name) in enumerate(unchanged, 1):
             lines.append(f"| {i} | {balo_id} | {name} |")
     else:
         lines.append("(none)")
@@ -473,10 +504,10 @@ def run_target(target_key: str, args) -> int:
         _log(f"  {total_rows} data rows from transformer")
 
         # Audit trail collectors
-        report_sent = []      # (balo_id, name, job_id, http_status)
-        report_filtered = []  # (balo_id, name, reason)
-        report_skipped = []   # (balo_id, name)
-        report_errors = []    # (balo_id, name, http_status, response)
+        report_sent = []       # (balo_id, name, job_id, http_status)
+        report_filtered = []   # (balo_id, name, reason)
+        report_unchanged = []  # (balo_id, name) — Bubble payload identical to last successful send
+        report_errors = []     # (balo_id, name, http_status, response)
 
         _log("Phase 3: Send")
         sender = Sender(log, dry_run=args.dry_run, verbose=args.verbose)
@@ -499,13 +530,8 @@ def run_target(target_key: str, args) -> int:
                 report_filtered.append((balo_id, name, f"missing {target['url_key']}"))
                 continue
 
-            # Check already sent — sender stores the full route URL in sync.db
-            # (e.g. "/crm/account/12345"), so build the same URL for the check.
+            # Build current Bubble payload
             route_url = target["route_template"].replace(":id", balo_id)
-            if log.already_sent(balo_id, route_url):
-                report_skipped.append((balo_id, name))
-                continue
-
             payload = _build_payload(
                 row,
                 target["payload_keys"],
@@ -515,8 +541,25 @@ def run_target(target_key: str, args) -> int:
                 defaults=target.get("defaults"),
             )
 
+            # Diff against last successful send. If Bubble payload is
+            # unchanged → skip (preserves SF-side edits). If some fields
+            # changed → for PATCH routes send only the diff (SF PATCH only
+            # touches fields present in the body). For POST /crm/prospect we
+            # send the full payload because Nick's Apex expects it complete;
+            # the Apex has its own dedupe to preserve SF-side edits.
+            last_payload = log.last_successful_payload(balo_id, route_url)
+            if last_payload is not None:
+                diff = _diff_payload(payload, last_payload)
+                if not diff:
+                    report_unchanged.append((balo_id, name))
+                    continue
+                wire_payload = payload if target["route_template"] == "/crm/prospect" else diff
+            else:
+                wire_payload = payload
+
             try:
-                result = send(balo_id, payload, sources)
+                # payload=wire (over HTTP), store_payload=full (baseline for next diff)
+                result = send(balo_id, wire_payload, sources, store_payload=payload)
                 # result is dict {"accepted": true, "jobId": "..."} on 202,
                 # None on dry-run. SenderError raised on non-202.
                 job_id = ""
@@ -540,19 +583,19 @@ def run_target(target_key: str, args) -> int:
         log.complete_run(
             run_id,
             records_sent=sender.sent_count,
-            records_skipped=sender.skipped_count,
+            records_skipped=len(report_unchanged),
         )
 
         # Write audit report
         report_path = _write_report(
             target_key, target, cursor_label, total_rows,
-            report_sent, report_filtered, report_skipped,
+            report_sent, report_filtered, report_unchanged,
             report_errors, store.warnings,
         )
 
         _log("-" * 64)
         _log(f"Sent: {len(report_sent)}  Filtered: {len(report_filtered)}  "
-             f"Skipped: {len(report_skipped)}  Errors: {len(report_errors)}")
+             f"Unchanged: {len(report_unchanged)}  Errors: {len(report_errors)}")
         _log(f"Report: {report_path}")
         if store.warnings:
             _log(f"Warnings: {len(store.warnings)} (first 5 below)")

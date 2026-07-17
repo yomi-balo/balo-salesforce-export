@@ -65,7 +65,7 @@ class Sender:
 
     # --- Route methods ------------------------------------------------------
 
-    def send_prospect(self, balo_id: str, payload: dict, sources: Iterable[dict]) -> dict | None:
+    def send_prospect(self, balo_id: str, payload: dict, sources: Iterable[dict], *, store_payload: dict | None = None) -> dict | None:
         return self._send(
             method="POST",
             route="/crm/prospect",
@@ -73,9 +73,10 @@ class Sender:
             balo_id=balo_id,
             payload=payload,
             sources=sources,
+            store_payload=store_payload,
         )
 
-    def send_account(self, balo_id: str, payload: dict, sources: Iterable[dict]) -> dict | None:
+    def send_account(self, balo_id: str, payload: dict, sources: Iterable[dict], *, store_payload: dict | None = None) -> dict | None:
         return self._send(
             method="PATCH",
             route=f"/crm/account/{balo_id}",
@@ -83,9 +84,10 @@ class Sender:
             balo_id=balo_id,
             payload=payload,
             sources=sources,
+            store_payload=store_payload,
         )
 
-    def send_contact(self, balo_id: str, payload: dict, sources: Iterable[dict]) -> dict | None:
+    def send_contact(self, balo_id: str, payload: dict, sources: Iterable[dict], *, store_payload: dict | None = None) -> dict | None:
         return self._send(
             method="PATCH",
             route=f"/crm/contact/{balo_id}",
@@ -93,9 +95,10 @@ class Sender:
             balo_id=balo_id,
             payload=payload,
             sources=sources,
+            store_payload=store_payload,
         )
 
-    def send_opportunity_case(self, case_number: str, payload: dict, sources: Iterable[dict]) -> dict | None:
+    def send_opportunity_case(self, case_number: str, payload: dict, sources: Iterable[dict], *, store_payload: dict | None = None) -> dict | None:
         return self._send(
             method="PATCH",
             route=f"/crm/opportunity/case/{case_number}",
@@ -103,9 +106,10 @@ class Sender:
             balo_id=case_number,
             payload=payload,
             sources=sources,
+            store_payload=store_payload,
         )
 
-    def send_opportunity_project(self, request_id: str, payload: dict, sources: Iterable[dict]) -> dict | None:
+    def send_opportunity_project(self, request_id: str, payload: dict, sources: Iterable[dict], *, store_payload: dict | None = None) -> dict | None:
         return self._send(
             method="PATCH",
             route=f"/crm/opportunity/project/{request_id}",
@@ -113,9 +117,10 @@ class Sender:
             balo_id=request_id,
             payload=payload,
             sources=sources,
+            store_payload=store_payload,
         )
 
-    def send_project_expert(self, composite_id: str, payload: dict, sources: Iterable[dict]) -> dict | None:
+    def send_project_expert(self, composite_id: str, payload: dict, sources: Iterable[dict], *, store_payload: dict | None = None) -> dict | None:
         return self._send(
             method="PATCH",
             route=f"/crm/project-expert/{composite_id}",
@@ -123,9 +128,10 @@ class Sender:
             balo_id=composite_id,
             payload=payload,
             sources=sources,
+            store_payload=store_payload,
         )
 
-    def send_consultation(self, meeting_id: str, payload: dict, sources: Iterable[dict]) -> dict | None:
+    def send_consultation(self, meeting_id: str, payload: dict, sources: Iterable[dict], *, store_payload: dict | None = None) -> dict | None:
         return self._send(
             method="PATCH",
             route=f"/crm/consultation/{meeting_id}",
@@ -133,6 +139,7 @@ class Sender:
             balo_id=meeting_id,
             payload=payload,
             sources=sources,
+            store_payload=store_payload,
         )
 
     # --- Core ---------------------------------------------------------------
@@ -146,18 +153,19 @@ class Sender:
         balo_id: str,
         payload: dict,
         sources: Iterable[dict],
+        store_payload: dict | None = None,
     ) -> dict | None:
-        if self.log.already_sent(balo_id, route):
-            self.skipped_count += 1
-            if self.verbose:
-                print(f"  [skip] {method} {route} — already sent", file=sys.stderr)
-            return None
+        """Send `payload` over HTTP; log `store_payload` (or `payload`) to sync.db.
 
+        Distinguishing wire vs. stored payload lets sync.py send a partial
+        diff to SF while still recording the full current Bubble state as the
+        baseline for next run's diff.
+        """
         event_id = self.log.log_send(
             sf_object=sf_object,
             route=route,
             balo_id=balo_id,
-            payload=payload,
+            payload=store_payload if store_payload is not None else payload,
             sources=sources,
         )
 
